@@ -35,3 +35,8 @@ select = ["E", "F", "W", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "scipy-stubs>=1.15.3.0",
+]

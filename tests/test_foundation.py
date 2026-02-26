@@ -89,8 +89,10 @@ def test_rng_uniformity() -> None:
     observed, _ = np.histogram(samples, bins=num_bins, range=(0.0, 1.0))
     expected = np.full(num_bins, N / num_bins)
 
-    stat, p_value = chisquare(observed, expected)
-    assert p_value > 0.001, f"Chi-squared uniformity test failed: p={p_value:.6f}, stat={stat:.2f}"
+    result = chisquare(observed, expected)
+    assert result.pvalue > 0.001, (
+        f"Chi-squared uniformity test failed: p={result.pvalue:.6f}, stat={result.statistic:.2f}"
+    )
 
 
 def test_rng_rand_below_stays_in_range() -> None:
