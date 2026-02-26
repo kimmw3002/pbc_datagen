@@ -49,6 +49,15 @@ struct IsingModel {
     // with probability p_add = 1 - exp(-2J/T), then flips the cluster.
     // Returns the cluster size.
     int _wolff_step();
+
+    // Local energy change if spin[site] were flipped (does NOT flip it).
+    // ΔE = 2 * s_i * Σ_{j ∈ neighbors(i)} s_j.
+    int _delta_energy(int site) const;
+
+    // Metropolis sweep: N random-site single-spin-flip proposals.
+    // Each proposal is accepted with probability min(1, exp(-ΔE/T)).
+    // Returns the number of accepted flips.
+    int _metropolis_sweep();
 };
 
 }  // namespace pbc

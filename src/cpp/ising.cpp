@@ -63,6 +63,47 @@ double IsingModel::abs_magnetization() const {
     return std::abs(static_cast<double>(sum)) / N;
 }
 
+int IsingModel::_delta_energy(int site) const {
+    // ΔE = 2 * s_i * (sum of neighbor spins).
+    // This is the energy change if spin[site] were flipped.
+    int si = spin[static_cast<size_t>(site)];
+    int neighbor_sum = 0;
+    for (int d = 0; d < 4; ++d) {
+        int j = nbr[static_cast<size_t>(site * 4 + d)];
+        neighbor_sum += spin[static_cast<size_t>(j)];
+    }
+    return 2 * si * neighbor_sum;
+}
+
+int IsingModel::_metropolis_sweep() {
+    // Precomputed acceptance probabilities.
+    // For the Ising model on a square lattice, ΔE ∈ {-8, -4, 0, +4, +8}.
+    // ΔE ≤ 0 is always accepted.  For ΔE > 0 we need exp(-ΔE/T).
+    // Index by ΔE/4: slot 1 → ΔE=+4, slot 2 → ΔE=+8.
+    double exp_table[3];
+    exp_table[0] = 1.0;                       // ΔE = 0: always accept
+    exp_table[1] = std::exp(-4.0 / T_);       // ΔE = +4
+    exp_table[2] = std::exp(-8.0 / T_);       // ΔE = +8
+
+    int accepted = 0;
+
+    for (int step = 0; step < N; ++step) {
+        // Pick a random site
+        int site = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+
+        int dE = _delta_energy(site);
+
+        // Accept if ΔE ≤ 0, otherwise accept with probability exp(-ΔE/T)
+        if (dE <= 0 || rng.uniform() < exp_table[dE / 4]) {
+            spin[static_cast<size_t>(site)] =
+                static_cast<int8_t>(-spin[static_cast<size_t>(site)]);
+            ++accepted;
+        }
+    }
+
+    return accepted;
+}
+
 int IsingModel::_wolff_step() {
     // Bond activation probability: aligned neighbors join the cluster
     // with this probability.  At low T it approaches 1 (large clusters),

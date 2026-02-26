@@ -60,5 +60,7 @@ PYBIND11_MODULE(_core, m) {
         .def("energy", &pbc::IsingModel::energy)
         .def("magnetization", &pbc::IsingModel::magnetization)
         .def("abs_magnetization", &pbc::IsingModel::abs_magnetization)
-        .def("_wolff_step", &pbc::IsingModel::_wolff_step);
+        .def("_wolff_step", &pbc::IsingModel::_wolff_step)
+        .def("_delta_energy", &pbc::IsingModel::_delta_energy, py::arg("site"))
+        .def("_metropolis_sweep", &pbc::IsingModel::_metropolis_sweep);
 }

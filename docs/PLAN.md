@@ -10,7 +10,7 @@
 ### 1.1 Ising Model
 - [x] Step 1.1.1: `ising.hpp` + `ising.cpp` — IsingModel struct, constructor, set_temperature
 - [x] Step 1.1.2: Wolff cluster update kernel
-- [ ] Step 1.1.3: Metropolis sweep with precomputed exp lookup table
+- [x] Step 1.1.3: Metropolis sweep with precomputed exp lookup table
 - [ ] Step 1.1.4: `sweep()` = Wolff + Metropolis, observable tracking (E, M, cluster size)
 
 ### 1.2 Blume-Capel Model
