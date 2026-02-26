@@ -1,0 +1,39 @@
+# Lessons Learned
+
+Hard-won insights from building this codebase. Read this before writing new code.
+
+## Physics / Algorithm
+
+- **Metropolis site selection must be random**, not sequential. A sequential sweep
+  (site 0, 1, 2, ..., N-1) creates correlations between proposals. At high T with
+  ~100% acceptance it degenerates into deterministic oscillation (all+1 → all-1 → ...).
+  Always pick N random sites per sweep.
+
+- **Both Wolff and Metropolis independently satisfy detailed balance** for the Ising model.
+  Either alone is a valid sampler. The hybrid (Wolff + Metropolis) is used because Wolff
+  kills critical slowing down while Metropolis handles local decorrelation.
+
+- **The 2×2 exact partition function is the gold standard test.** Z(T) = 2exp(8/T) + 12 + 2exp(-8/T).
+  Only 3 energy levels (E = -8, 0, +8). Chi-squared test against exact P(E) at multiple
+  temperatures is the definitive check for detailed balance.
+
+## Statistics / Testing
+
+- **Chi-squared requires expected counts >= 5 per bin.** At low T the rare states (e.g. E=+8)
+  have tiny probability. With too few samples the expected count drops below 5 and the test
+  becomes unreliable. Fix: increase samples (we use 500k for the 2×2 tests).
+
+## C++ / Build
+
+- **Rebuild after C++ changes:** `uv sync --all-extras --reinstall-package pbc-datagen`.
+  Plain `uv sync` only tracks Python metadata and won't recompile .cpp/.hpp changes.
+
+- **Update `_core.pyi` when adding new bindings.** mypy uses the stub file, not the compiled
+  .so. Forgetting to update it causes spurious mypy errors.
+
+- **`std::vector<bool>` packs 8 bools per byte** — good for large visited/in_cluster arrays
+  but slightly slower per-access than `std::vector<char>`.
+
+- **Use explicit stack, not recursion, for DFS** on lattice clusters. Recursive DFS can
+  blow the call stack on large lattices (256×256 = 65k deep). `std::vector<int>` as a
+  stack lives on the heap and grows as needed.

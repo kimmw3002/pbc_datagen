@@ -1,5 +1,8 @@
 # CLAUDE.md — Project Rules for pbc_datagen
 
+**Always read `docs/LESSONS.md` at the start of every session.** It contains
+hard-won insights about physics, testing, and build pitfalls in this project.
+
 ## What This Project Is
 
 A paper-quality dataset generator for 2D lattice model snapshots (Ising, Blume-Capel, Ashkin-Teller).
