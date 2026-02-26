@@ -18,10 +18,10 @@
 Tests: `tests/ising/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. All include 2×2 exact partition function chi-squared checks for detailed balance.
 
 ### 1.2 Blume-Capel Model
-- [ ] Step 1.2.1: `blume_capel.hpp` + `blume_capel.cpp` — BlumeCapelModel struct, constructor
+- [x] Step 1.2.1: `blume_capel.hpp` + `blume_capel.cpp` — BlumeCapelModel struct, constructor, set_temperature, set_crystal_field, energy, magnetization, abs_magnetization, quadrupole, set_spin
 - [ ] Step 1.2.2: Geometric Cluster Algorithm (Heringa & Blöte point reflection)
 - [ ] Step 1.2.3: Local Metropolis sweep over {-1, 0, +1} with crystal field D
-- [ ] Step 1.2.4: `sweep()` = GCA + Metropolis, observable tracking (E, M, ρ_vac, cluster size)
+- [ ] Step 1.2.4: `sweep()` = GCA + Metropolis, observable tracking (E, M, Q, cluster size)
 
 ### 1.3 Ashkin-Teller Model
 - [ ] Step 1.3.1: `ashkin_teller.hpp` + `ashkin_teller.cpp` — AshkinTellerModel struct

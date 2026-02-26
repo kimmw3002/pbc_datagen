@@ -132,6 +132,58 @@ def test_ising_abs_magnetization_cold_start() -> None:
         )
 
 
+def test_ising_all_minus_one_observables() -> None:
+    """All -1 state: E = -2L² (same as all +1), m = -1.0, |m| = 1.0.
+
+    The all-down state is the other Ising ground state.  Energy depends
+    on s_i·s_j = (-1)(-1) = +1, identical to the all-up case.
+    But magnetization flips sign: m = -1.0.  This catches bugs where
+    the energy accidentally depends on the sign of individual spins,
+    or where abs_magnetization isn't truly |m|.
+    """
+    from pbc_datagen._core import IsingModel
+
+    for L in [2, 4, 8]:
+        model = IsingModel(L=L, seed=42)
+        model.set_temperature(1.0)
+        for site in range(L * L):
+            model.set_spin(site, -1)
+
+        assert model.energy() == -2 * L * L, (
+            f"All -1 energy for L={L}: expected {-2 * L * L}, got {model.energy()}"
+        )
+        assert model.magnetization() == pytest.approx(-1.0), (
+            f"All -1 magnetization for L={L}: expected -1.0, got {model.magnetization()}"
+        )
+        assert model.abs_magnetization() == pytest.approx(1.0), (
+            f"All -1 |m| for L={L}: expected 1.0, got {model.abs_magnetization()}"
+        )
+
+
+def test_ising_set_spin_rejects_invalid_values() -> None:
+    """set_spin must reject values outside {-1, +1}.
+
+    Ising spins are strictly ±1.  Passing 0 (a BC vacancy), 2, or -2
+    should raise — silently accepting them would corrupt the energy
+    calculation (delta_energy assumes s_i ∈ {-1, +1}).
+    """
+    from pbc_datagen._core import IsingModel
+
+    model = IsingModel(L=4, seed=42)
+
+    # Valid values — should not raise
+    model.set_spin(0, +1)
+    model.set_spin(1, -1)
+
+    # Invalid values — must raise
+    with pytest.raises((ValueError, RuntimeError)):
+        model.set_spin(0, 0)
+    with pytest.raises((ValueError, RuntimeError)):
+        model.set_spin(0, 2)
+    with pytest.raises((ValueError, RuntimeError)):
+        model.set_spin(0, -2)
+
+
 def test_ising_2x2_checkerboard_observables() -> None:
     """2×2 checkerboard must have E = +8, m = 0, |m| = 0.
 

@@ -3,6 +3,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
+#include "blume_capel.hpp"
 #include "ising.hpp"
 #include "lattice.hpp"
 #include "prng.hpp"
@@ -78,4 +79,30 @@ PYBIND11_MODULE(_core, m) {
             out["abs_m"]  = std::move(abs_m);
             return out;
         }, py::arg("n_sweeps"));
+
+    // --- Blume-Capel model -----------------------------------------------
+    py::class_<pbc::BlumeCapelModel>(m, "BlumeCapelModel")
+        .def(py::init<int, uint64_t>(), py::arg("L"), py::arg("seed"))
+        .def_readonly("L", &pbc::BlumeCapelModel::L)
+        .def_property_readonly("T", [](const pbc::BlumeCapelModel& self) {
+            return self.T_;
+        })
+        .def_property_readonly("D", [](const pbc::BlumeCapelModel& self) {
+            return self.D_;
+        })
+        .def_property_readonly("spins", [](const pbc::BlumeCapelModel& self) {
+            return py::array_t<int8_t>(
+                {self.L, self.L},
+                {self.L * (int)sizeof(int8_t), (int)sizeof(int8_t)},
+                self.spin.data(),
+                py::cast(self)
+            );
+        })
+        .def("set_temperature", &pbc::BlumeCapelModel::set_temperature, py::arg("T"))
+        .def("set_crystal_field", &pbc::BlumeCapelModel::set_crystal_field, py::arg("D"))
+        .def("set_spin", &pbc::BlumeCapelModel::set_spin, py::arg("site"), py::arg("value"))
+        .def("energy", &pbc::BlumeCapelModel::energy)
+        .def("magnetization", &pbc::BlumeCapelModel::magnetization)
+        .def("abs_magnetization", &pbc::BlumeCapelModel::abs_magnetization)
+        .def("quadrupole", &pbc::BlumeCapelModel::quadrupole);
 }
