@@ -15,6 +15,8 @@ the tests even before the C++ binding exists.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -142,4 +144,58 @@ def test_wolff_low_temperature_large_clusters() -> None:
     assert cluster_size > N * 0.9, (
         f"First cluster at low T has size {cluster_size}, "
         f"expected > {int(N * 0.9)} (≈ 90% of N={N})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Detailed balance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("T", np.linspace(0.5, 5.0, num=10))
+def test_wolff_detailed_balance_2x2(T: float) -> None:
+    """Wolff on 2×2 must reproduce exact Boltzmann distribution.
+
+    The 2×2 Ising model has 16 states with 3 energy levels:
+      E = -8 (degeneracy 2), E = 0 (degeneracy 12), E = +8 (degeneracy 2)
+
+    Z(T) = 2 exp(8/T) + 12 + 2 exp(-8/T)
+
+    Wolff alone satisfies detailed balance for the Ising model, so
+    the energy histogram must match the exact probabilities.
+    """
+    from pbc_datagen._core import IsingModel
+    from scipy.stats import chisquare
+
+    Z = 2 * math.exp(8 / T) + 12 + 2 * math.exp(-8 / T)
+    exact_probs = {
+        -8: 2 * math.exp(8 / T) / Z,
+        0: 12 / Z,
+        8: 2 * math.exp(-8 / T) / Z,
+    }
+
+    model = IsingModel(L=2, seed=42)
+    model.set_temperature(T)
+
+    # Equilibrate
+    for _ in range(500):
+        model._wolff_step()
+
+    # Sample
+    n_samples = 500_000
+    energy_counts: dict[int, int] = {-8: 0, 0: 0, 8: 0}
+    for _ in range(n_samples):
+        model._wolff_step()
+        e = model.energy()
+        energy_counts[e] += 1
+
+    observed = np.array([energy_counts[-8], energy_counts[0], energy_counts[8]], dtype=float)
+    expected = np.array([exact_probs[-8], exact_probs[0], exact_probs[8]]) * n_samples
+
+    result = chisquare(observed, expected)
+    assert result.pvalue > 0.001, (
+        f"Detailed balance violated at T={T}: chi2={result.statistic:.1f}, "
+        f"p={result.pvalue:.6f}\n"
+        f"  observed: {observed}\n"
+        f"  expected: {expected}"
     )
