@@ -1,0 +1,13 @@
+{
+    "cmake.configureSettings": {
+        "pybind11_DIR": "${workspaceFolder}/.venv/lib/python3.14/site-packages/pybind11/share/cmake/pybind11",
+        "Python_EXECUTABLE": "${workspaceFolder}/.venv/bin/python",
+        "Python_ROOT_DIR": "${workspaceFolder}/.venv"
+    },
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/python"
+    ],
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none"
+    }
+}

@@ -15,10 +15,8 @@ __pycache__/
 .python-version
 
 # uv
-uv.lock
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
