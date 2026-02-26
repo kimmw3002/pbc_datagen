@@ -1,0 +1,46 @@
+# Build
+build/
+dist/
+*.egg-info/
+*.so
+*.dylib
+*.o
+*.a
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.python-version
+
+# uv
+uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data output
+data/
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Logs
+*.log
