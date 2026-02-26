@@ -59,5 +59,6 @@ PYBIND11_MODULE(_core, m) {
         .def("set_spin", &pbc::IsingModel::set_spin, py::arg("site"), py::arg("value"))
         .def("energy", &pbc::IsingModel::energy)
         .def("magnetization", &pbc::IsingModel::magnetization)
-        .def("abs_magnetization", &pbc::IsingModel::abs_magnetization);
+        .def("abs_magnetization", &pbc::IsingModel::abs_magnetization)
+        .def("_wolff_step", &pbc::IsingModel::_wolff_step);
 }

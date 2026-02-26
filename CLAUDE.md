@@ -51,6 +51,14 @@ But equally important: **this is a learning project**. The user is new to C++ an
 - `scipy` for autocorrelation analysis.
 - `h5py` for snapshot I/O.
 
+## Building
+
+C++ changes require a forced rebuild — `uv sync` alone won't recompile
+if only `.cpp`/`.hpp` files changed (it only tracks Python metadata):
+```bash
+uv sync --all-extras --reinstall-package pbc-datagen
+```
+
 ## Workflow
 
 1. Check `docs/PLAN.md` for what to implement next.

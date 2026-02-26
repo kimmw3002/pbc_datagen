@@ -63,4 +63,50 @@ double IsingModel::abs_magnetization() const {
     return std::abs(static_cast<double>(sum)) / N;
 }
 
+int IsingModel::_wolff_step() {
+    // Bond activation probability: aligned neighbors join the cluster
+    // with this probability.  At low T it approaches 1 (large clusters),
+    // at high T it approaches 0 (clusters of size ~1).
+    double p_add = 1.0 - std::exp(-2.0 / T_);
+
+    // Pick a random seed spin
+    int seed = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+    int8_t seed_spin = spin[static_cast<size_t>(seed)];
+
+    // Track which sites belong to the cluster
+    std::vector<bool> in_cluster(static_cast<size_t>(N), false);
+
+    // DFS stack for growing the cluster
+    std::vector<int> stack;
+    stack.push_back(seed);
+    in_cluster[static_cast<size_t>(seed)] = true;
+    int cluster_size = 0;
+
+    while (!stack.empty()) {
+        int site = stack.back();
+        stack.pop_back();
+        ++cluster_size;
+
+        // Try to add each of the 4 neighbors
+        for (int d = 0; d < 4; ++d) {
+            int j = nbr[static_cast<size_t>(site * 4 + d)];
+            if (!in_cluster[static_cast<size_t>(j)]
+                && spin[static_cast<size_t>(j)] == seed_spin
+                && rng.uniform() < p_add) {
+                in_cluster[static_cast<size_t>(j)] = true;
+                stack.push_back(j);
+            }
+        }
+    }
+
+    // Flip every spin in the cluster
+    for (int i = 0; i < N; ++i) {
+        if (in_cluster[static_cast<size_t>(i)]) {
+            spin[static_cast<size_t>(i)] = static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
+        }
+    }
+
+    return cluster_size;
+}
+
 }  // namespace pbc

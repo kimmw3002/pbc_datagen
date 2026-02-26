@@ -43,6 +43,12 @@ struct IsingModel {
 
     // Intensive absolute magnetization:  |m| = (1/N) |Σ_i s_i|.
     double abs_magnetization() const;
+
+    // Wolff single-cluster update (Wolff, 1989).
+    // Grows a cluster from a random seed spin by adding aligned neighbors
+    // with probability p_add = 1 - exp(-2J/T), then flips the cluster.
+    // Returns the cluster size.
+    int _wolff_step();
 };
 
 }  // namespace pbc
