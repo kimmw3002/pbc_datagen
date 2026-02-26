@@ -114,8 +114,7 @@ def test_ising_magnetization_cold_start() -> None:
     for L in [2, 4, 8]:
         model = IsingModel(L=L, seed=42)
         assert model.magnetization() == pytest.approx(1.0), (
-            f"Wrong cold-start magnetization for L={L}: "
-            f"got {model.magnetization()}, expected 1.0"
+            f"Wrong cold-start magnetization for L={L}: got {model.magnetization()}, expected 1.0"
         )
 
 
@@ -129,8 +128,7 @@ def test_ising_abs_magnetization_cold_start() -> None:
     for L in [2, 4, 8]:
         model = IsingModel(L=L, seed=42)
         assert model.abs_magnetization() == pytest.approx(1.0), (
-            f"Wrong cold-start |m| for L={L}: "
-            f"got {model.abs_magnetization()}, expected 1.0"
+            f"Wrong cold-start |m| for L={L}: got {model.abs_magnetization()}, expected 1.0"
         )
 
 

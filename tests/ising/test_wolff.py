@@ -60,9 +60,7 @@ def test_wolff_returns_cluster_size_in_valid_range() -> None:
         assert isinstance(cluster_size, int), (
             f"_wolff_step() should return int, got {type(cluster_size)}"
         )
-        assert 1 <= cluster_size <= N, (
-            f"Cluster size {cluster_size} outside valid range [1, {N}]"
-        )
+        assert 1 <= cluster_size <= N, f"Cluster size {cluster_size} outside valid range [1, {N}]"
 
 
 def test_wolff_magnetization_changes_by_twice_cluster_size() -> None:
@@ -118,10 +116,7 @@ def test_wolff_high_temperature_small_clusters() -> None:
     mean_size = np.mean(sizes)
     # At T=100, p_add ≈ 1 - exp(-0.02) ≈ 0.02.
     # Mean cluster size should be very small compared to N=1024.
-    assert mean_size < 2, (
-        f"Mean cluster size {mean_size:.1f} is too large at high T "
-        f"(expected < 2)"
-    )
+    assert mean_size < 2, f"Mean cluster size {mean_size:.1f} is too large at high T (expected < 2)"
 
 
 def test_wolff_low_temperature_large_clusters() -> None:

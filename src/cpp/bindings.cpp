@@ -62,5 +62,20 @@ PYBIND11_MODULE(_core, m) {
         .def("abs_magnetization", &pbc::IsingModel::abs_magnetization)
         .def("_wolff_step", &pbc::IsingModel::_wolff_step)
         .def("_delta_energy", &pbc::IsingModel::_delta_energy, py::arg("site"))
-        .def("_metropolis_sweep", &pbc::IsingModel::_metropolis_sweep);
+        .def("_metropolis_sweep", &pbc::IsingModel::_metropolis_sweep)
+        .def("sweep", [](pbc::IsingModel& self, int n_sweeps) {
+            auto result = self.sweep(n_sweeps);
+            auto n = static_cast<py::ssize_t>(n_sweeps);
+
+            // Copy each vector into a numpy array
+            py::array_t<int>    energy(n, result.energy.data());
+            py::array_t<double> m(n, result.m.data());
+            py::array_t<double> abs_m(n, result.abs_m.data());
+
+            py::dict out;
+            out["energy"] = std::move(energy);
+            out["m"]      = std::move(m);
+            out["abs_m"]  = std::move(abs_m);
+            return out;
+        }, py::arg("n_sweeps"));
 }

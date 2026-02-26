@@ -2,16 +2,20 @@
 
 ## Phase 1: C++ Backend & Hybrid Update Kernels
 
-### 1.0 Foundation
-- [x] Step 1.0.1: Project scaffold — directory structure, CMakeLists, pyproject.toml
-- [x] Step 1.0.2: `prng.hpp` — import Xoshiro256++ (Blackman & Vigna), wrap in `Rng` class
+### 1.0 Foundation ✅
+
+- [x] Step 1.0.1: Project scaffold — `src/cpp/`, `python/`, `tests/`, CMakeLists, pyproject.toml
+- [x] Step 1.0.2: `prng.hpp` — Xoshiro256++ wrapped in `Rng` class
 - [x] Step 1.0.3: `lattice.hpp` — flat 1D lattice + precomputed PBC neighbor table
 
-### 1.1 Ising Model
-- [x] Step 1.1.1: `ising.hpp` + `ising.cpp` — IsingModel struct, constructor, set_temperature
-- [x] Step 1.1.2: Wolff cluster update kernel
-- [x] Step 1.1.3: Metropolis sweep with precomputed exp lookup table
-- [ ] Step 1.1.4: `sweep()` = Wolff + Metropolis, observable tracking (E, M, cluster size)
+### 1.1 Ising Model ✅
+
+- [x] Step 1.1.1: `ising.hpp` + `ising.cpp` — IsingModel struct, constructor, set_temperature, energy, magnetization, abs_magnetization, set_spin
+- [x] Step 1.1.2: `_wolff_step()` — Wolff single-cluster update (DFS with explicit stack, `std::vector<bool>` for in_cluster)
+- [x] Step 1.1.3: `_metropolis_sweep()` — N random-site proposals with precomputed exp table (ΔE ∈ {-8,-4,0,+4,+8})
+- [x] Step 1.1.4: `sweep(n_sweeps)` — Metropolis + Wolff repeated n times, returns dict of observable arrays (energy, m, abs_m). Bound via lambda in bindings.cpp that copies vectors into numpy arrays.
+
+Tests: `tests/ising/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. All include 2×2 exact partition function chi-squared checks for detailed balance.
 
 ### 1.2 Blume-Capel Model
 - [ ] Step 1.2.1: `blume_capel.hpp` + `blume_capel.cpp` — BlumeCapelModel struct, constructor
@@ -43,59 +47,17 @@
 
 ## Test Plan
 
-- [x] Unit: PRNG smoke test (determinism, range, uniformity, autocorrelation)
-- [x] Unit: Neighbor table correctness for various L (shape, PBC, symmetry)
-- [x] Unit: IsingModel construction, energy, magnetization, |m| on cold start & 2×2 checkerboard
-- [ ] Unit: Ising exact results (2×2 partition function, known T_c ≈ 2.269)
+- [x] Unit: PRNG smoke test (determinism, range, uniformity, autocorrelation) — `tests/test_foundation.py`
+- [x] Unit: Neighbor table correctness for various L (shape, PBC, symmetry) — `tests/test_foundation.py`
+- [x] Unit: Ising model construction, energy, magnetization — `tests/ising/test_model.py`
+- [x] Unit: Ising Wolff detailed balance (2×2 chi-squared at 10 temperatures) — `tests/ising/test_wolff.py`
+- [x] Unit: Ising Metropolis detailed balance (2×2 chi-squared at 10 temperatures) — `tests/ising/test_metropolis.py`
+- [x] Unit: Ising sweep detailed balance + ergodicity — `tests/ising/test_sweep.py`
 - [ ] Unit: BC energy/magnetization consistency after sweep
 - [ ] Unit: AT energy/magnetization consistency after sweep
 - [ ] Integration: Full pipeline — equilibrate, measure τ_int, generate snapshots
 
-## Test Strategy for Steps 1.1.2–1.1.4
-
-Expose internal kernels via pybind11 (underscore-prefixed) so every building
-block is individually testable from pytest.  The public API stays clean —
-users only see `sweep()`.
-
-### Step 1.1.2 — Wolff cluster update (`wolff_step`)
-
-Bind as `_wolff_step() -> int` (returns cluster size).
-
-| Test | What it checks |
-|---|---|
-| **Cluster flips spins** | After `_wolff_step()` on all-+1, at least one spin is -1 |
-| **Energy change is consistent** | E_before - E_after matches recomputed energy |
-| **Cluster size in [1, N]** | Returned size is within valid bounds |
-| **Magnetization changes by 2×cluster_size/N** | |m_before - m_after| = 2 × cluster_size / N (Wolff flips a connected cluster) |
-| **High-T large clusters** | At T >> T_c, mean cluster size → O(1) (disordered, bonds rarely activate) |
-| **Low-T large clusters** | At T << T_c, mean cluster size → O(N) (ordered, most bonds activate) |
-
-### Step 1.1.3 — Metropolis sweep (`_delta_energy`, `_metropolis_sweep`)
-
-Bind `_delta_energy(site) -> int` and `_metropolis_sweep() -> int` (returns
-number of accepted flips).
-
-| Test | What it checks |
-|---|---|
-| **ΔE exact values on cold start** | `_delta_energy(any_site)` on all-+1 = +8 (flipping one +1 among four +1 neighbors: ΔE = 2×1×4 = 8) |
-| **ΔE on checkerboard** | `_delta_energy(site)` on 2×2 checkerboard = -8 (all neighbors are antiparallel) |
-| **ΔE is O(1)** | Only depends on 4 neighbors, not system size — verify same result for L=4 and L=64 |
-| **Metropolis respects detailed balance** | Run many sweeps on 2×2 lattice, histogram all 16 states, compare to exact Boltzmann weights Z⁻¹exp(-E/T). Chi-squared test against exact probabilities |
-| **Acceptance rate vs temperature** | At T→∞ acceptance ≈ 50% (random), at T→0 acceptance ≈ 0% for cold start (all flips cost +8) |
-| **Energy is conserved mod ΔE** | E_after = E_before + ΔE for each accepted flip (when testing single flips) |
-
-### Step 1.1.4 — Combined sweep + observables
-
-Bind `sweep()` (1 Wolff step + 1 full Metropolis sweep).
-
-| Test | What it checks |
-|---|---|
-| **2×2 Boltzmann distribution** | Run many sweeps, verify state histogram matches exact partition function P(E) = g(E)exp(-E/T)/Z |
-| **Energy in valid range** | After sweep, -2L² ≤ E ≤ +2L² |
-| **Observables track state** | energy() and magnetization() are consistent with the spin array |
-| **Ergodicity** | Starting from all-+1 and all-−1 at T > T_c, both reach same ⟨E⟩ within tolerance |
-
-### The 2×2 exact partition function (key validation tool)
+## 2×2 Exact Partition Function (key validation tool)
 
 The 2×2 Ising model has 2⁴ = 16 states and only 3 distinct energy levels:
 

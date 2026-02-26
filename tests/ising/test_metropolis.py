@@ -94,9 +94,7 @@ def test_metropolis_sweep_returns_accepted_count_in_valid_range() -> None:
     for _ in range(10):
         accepted = model._metropolis_sweep()
         assert isinstance(accepted, int)
-        assert 0 <= accepted <= N, (
-            f"Accepted count {accepted} outside [0, {N}]"
-        )
+        assert 0 <= accepted <= N, f"Accepted count {accepted} outside [0, {N}]"
 
 
 def test_metropolis_cold_start_low_temp_near_zero_acceptance() -> None:

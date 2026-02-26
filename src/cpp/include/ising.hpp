@@ -58,6 +58,18 @@ struct IsingModel {
     // Each proposal is accepted with probability min(1, exp(-ΔE/T)).
     // Returns the number of accepted flips.
     int _metropolis_sweep();
+
+    // Result of sweep(): per-iteration observables.
+    struct SweepResult {
+        std::vector<int>    energy;   // total energy after each iteration
+        std::vector<double> m;        // intensive magnetization after each
+        std::vector<double> abs_m;    // intensive |magnetization| after each
+    };
+
+    // Combined update: n_sweeps iterations of (Metropolis sweep + Wolff step).
+    // After each iteration, records (E, m, |m|) into the returned arrays.
+    // Requires set_temperature() to have been called (T_ > 0).
+    SweepResult sweep(int n_sweeps);
 };
 
 }  // namespace pbc

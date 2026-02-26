@@ -38,8 +38,8 @@ Paper-quality dataset generator for independent spatial snapshots of three 2D la
 ## C++ Layer — Design Principles
 
 - **Flat 1D array** for lattice memory: site `(r, c)` → index `r * L + c`. Cache-friendly.
-- **Precomputed neighbor table**: `NeighborTable` stores 4 neighbors per site to avoid modular arithmetic in inner loops.
-- **PRNG**: Import a header-only library (e.g. PCG or Xoshiro256++) rather than hand-rolling. Must support `jump()` for independent parallel streams.
+- **Precomputed neighbor table**: `make_neighbor_table(L)` stores 4 neighbors per site in a flat `vector<int32_t>` to avoid modular arithmetic in inner loops.
+- **PRNG**: Xoshiro256++ (Blackman & Vigna, 2018) vendored as header-only. `Rng` wrapper exposes `uniform()`, `rand_below()`, `jump()` for independent parallel streams.
 - **No abstraction over physics**: three bespoke model structs, each with its own `sweep()`.
 - **Branchless inner loops** wherever possible (lookup tables for Metropolis acceptance).
 
@@ -71,26 +71,34 @@ pbc_datagen/
 ├── pyproject.toml              # uv / Python project config
 ├── docs/
 │   ├── ARCHITECTURE.md         # This file
-│   └── PLAN.md                 # Implementation plan
+│   ├── PLAN.md                 # Implementation plan
+│   └── LESSONS.md              # Hard-won physics/build/testing insights
 ├── src/cpp/
 │   ├── include/
-│   │   ├── prng.hpp            # PRNG (imported header-only lib)
-│   │   ├── lattice.hpp         # Flat lattice + neighbor table
-│   │   ├── ising.hpp           # Ising model header
-│   │   ├── blume_capel.hpp     # Blume-Capel header
-│   │   └── ashkin_teller.hpp   # Ashkin-Teller header
-│   ├── ising.cpp               # Ising implementation
-│   ├── blume_capel.cpp         # Blume-Capel implementation
-│   ├── ashkin_teller.cpp       # Ashkin-Teller implementation
-│   └── bindings.cpp            # pybind11 module
+│   │   ├── xoshiro256pp.hpp    # Vendored Xoshiro256++ PRNG engine
+│   │   ├── prng.hpp            # Rng wrapper (uniform, rand_below, jump)
+│   │   ├── lattice.hpp         # Flat lattice + PBC neighbor table
+│   │   ├── ising.hpp           # IsingModel struct + SweepResult
+│   │   ├── blume_capel.hpp     # Blume-Capel header (stub)
+│   │   └── ashkin_teller.hpp   # Ashkin-Teller header (stub)
+│   ├── ising.cpp               # Ising: Wolff, Metropolis, sweep
+│   ├── blume_capel.cpp         # Blume-Capel implementation (stub)
+│   ├── ashkin_teller.cpp       # Ashkin-Teller implementation (stub)
+│   └── bindings.cpp            # pybind11 _core module
 ├── python/pbc_datagen/
 │   ├── __init__.py
-│   ├── orchestrator.py         # Parallel temperature manager
-│   ├── autocorrelation.py      # τ_int calculation
-│   ├── validation.py           # Equilibration & cluster scaling
-│   └── io.py                   # HDF5/numpy disk I/O
+│   ├── _core.pyi               # Type stubs for C++ extension (mypy)
+│   ├── orchestrator.py         # Parallel temperature manager (stub)
+│   ├── autocorrelation.py      # τ_int calculation (stub)
+│   ├── validation.py           # Equilibration & cluster scaling (stub)
+│   └── io.py                   # HDF5/numpy disk I/O (stub)
 ├── tests/
-│   └── ...                     # pytest test suite
+│   ├── test_foundation.py      # PRNG + neighbor table tests
+│   └── ising/                  # Ising model tests (per-model folder)
+│       ├── test_model.py       # Construction, energy, magnetization
+│       ├── test_wolff.py       # Wolff cluster kernel + detailed balance
+│       ├── test_metropolis.py  # Metropolis sweep + detailed balance
+│       └── test_sweep.py       # Combined sweep + ergodicity
 └── scripts/
     └── generate_dataset.py     # Main entry point
 ```
