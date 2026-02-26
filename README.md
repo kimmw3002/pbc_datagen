@@ -21,13 +21,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 ## Setup
 
 ```bash
-uv pip install -e ".[dev]"
+uv sync --all-extras
 ```
 
 This single command:
-1. Installs Python dependencies (numpy, scipy, h5py, etc.)
-2. Invokes CMake, which compiles all C++ source into a shared library (`_core.so`)
-3. Places the compiled binary into the package so Python can import it
+1. Creates/updates the virtual environment
+2. Installs Python dependencies (numpy, scipy, h5py, etc.)
+3. Invokes CMake, which compiles all C++ source into a shared library (`_core.so`)
+4. Places the compiled binary into the package so Python can import it
 
 After this, you can do:
 ```python
@@ -38,9 +39,10 @@ from pbc_datagen._core import IsingModel
 
 **Python changes** take effect immediately (editable install).
 
-**C++ changes** require a rebuild:
+**C++ changes** require a forced rebuild — `uv sync` alone won't recompile
+if only `.cpp`/`.hpp` files changed (it only tracks Python metadata):
 ```bash
-uv pip install -e .
+uv sync --all-extras --reinstall-package pbc-datagen
 ```
 
 There is no runtime compilation — all C++ is compiled at install time, not at import time.

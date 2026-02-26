@@ -4,8 +4,8 @@
 
 ### 1.0 Foundation
 - [x] Step 1.0.1: Project scaffold — directory structure, CMakeLists, pyproject.toml
-- [ ] Step 1.0.2: `prng.hpp` — import a header-only PRNG library (e.g. PCG or Xoshiro256++)
-- [ ] Step 1.0.3: `lattice.hpp` — flat 1D lattice + precomputed PBC neighbor table
+- [x] Step 1.0.2: `prng.hpp` — import Xoshiro256++ (Blackman & Vigna), wrap in `Rng` class
+- [x] Step 1.0.3: `lattice.hpp` — flat 1D lattice + precomputed PBC neighbor table
 
 ### 1.1 Ising Model
 - [ ] Step 1.1.1: `ising.hpp` + `ising.cpp` — IsingModel struct, constructor, set_temperature
@@ -43,8 +43,8 @@
 
 ## Test Plan
 
-- [ ] Unit: PRNG smoke test (verify imported library links and produces output)
-- [ ] Unit: Neighbor table correctness for various L
+- [x] Unit: PRNG smoke test (determinism, range, uniformity, autocorrelation)
+- [x] Unit: Neighbor table correctness for various L (shape, PBC, symmetry)
 - [ ] Unit: Ising exact results (2×2 partition function, known T_c ≈ 2.269)
 - [ ] Unit: BC energy/magnetization consistency after sweep
 - [ ] Unit: AT energy/magnetization consistency after sweep
