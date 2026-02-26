@@ -8,6 +8,7 @@ dependencies = [
     "scipy>=1.10",
     "h5py>=3.8",
     "matplotlib>=3.7",
+    "rich>=14.3.3",
 ]
 
 [project.optional-dependencies]

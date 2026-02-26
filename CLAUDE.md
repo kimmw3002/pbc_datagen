@@ -54,6 +54,15 @@ But equally important: **this is a learning project**. The user is new to C++ an
 - `scipy` for autocorrelation analysis.
 - `h5py` for snapshot I/O.
 
+### 7. Verification — Always Check the Whole Codebase
+Before committing, run checks on `.` (the whole repo), not just a subdirectory:
+```bash
+uv run mypy .
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+```
+
 ## Building
 
 C++ changes require a forced rebuild — `uv sync` alone won't recompile
