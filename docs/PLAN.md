@@ -68,26 +68,42 @@ changing any Python orchestration code.
 
 ### Architecture Overview
 
-Three-stage pipeline. Each stage is a separate module with a clean public API for TDD.
+Five-stage pipeline. Each stage is a separate module with a clean public API for TDD.
 
 ```
- Orchestrator
- ┌──────────────────────────────────────────────────────────┐
- │  For each param value (e.g. D) in linspace:              │
- │                                                          │
- │  ┌─────────┐     ┌──────────┐     ┌──────────────────┐  │
- │  │  Pilot   │────▶│  Ladder  │────▶│  PT Production   │  │
- │  │  Run     │     │  Design  │     │  (A → B → C)     │  │
- │  └─────────┘     └──────────┘     └──────────────────┘  │
- │       │                                    │             │
- │       │         ┌──────────────┐           │             │
- │       └────────▶│ Autocorrel.  │◀──────────┘             │
- │                 └──────────────┘                         │
- │                        │                                 │
- │                 ┌──────▼──────┐                          │
- │                 │  HDF5 I/O   │                          │
- │                 └─────────────┘                          │
- └──────────────────────────────────────────────────────────┘
+ For each param value (e.g. D) in linspace:
+
+ ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐
+ │  1. Pilot  │───▶│ 2. Ladder │───▶│  3. PT    │───▶│  4. PT    │───▶│  5. PT    │
+ │  (single-  │    │  Design   │    │  Phase A  │    │  Phase B  │    │  Phase C  │
+ │   chain)   │    │           │    │  (tune)   │    │  (equil.) │    │ (produce) │
+ └─────┬──┬──┘    └─────┬─────┘    └─────┬─────┘    └──┬────┬──┘    └─────┬─────┘
+       │  │             │                │              │    │              │
+       │  │  naive τ_int│  warm-start    │  locked      │    │ true τ_max   │
+       │  │  + E hists  │  β ladder      │  β ladder    │    │ (for thin)   │
+       │  ▼             ▼                ▼              │    ▼              ▼
+       │  ┌──────────────────────────────────────────┐  │  ┌──────────┐  ┌────────┐
+       └─▶│           Autocorrelation (acf_fft)      │◀─┘  │ τ_max    │  │ HDF5   │
+          └──────────────────────────────────────────┘     │ locked   │─▶│ I/O    │
+                                                           └──────────┘  └────────┘
+
+ Data flow summary:
+ ───────────────────────────────────────────────────────────────────────────────
+ Stage        Produces                    Consumed by
+ ───────────────────────────────────────────────────────────────────────────────
+ 1. Pilot     naive τ_int, E histograms   2. Ladder Design
+ 2. Ladder    warm-start β array          3. Phase A
+ 3. Phase A   tuned β array → LOCK        4. Phase B
+ 4. Phase B   equilibrated streams,       5. Phase C
+              true PT τ_max → LOCK
+ 5. Phase C   thinned snapshots           HDF5 I/O
+ ───────────────────────────────────────────────────────────────────────────────
+
+ KEY INSIGHT: τ_int is measured TWICE.
+   • Pilot τ_int (single-chain, naive) — only used for ladder design.
+   • Phase B τ_int (PT, true) — used for production thinning.
+   PT injects decorrelated configs from hot replicas, so PT τ_int ≪ pilot τ_int.
+   Using the pilot value for thinning would discard good snapshots.
 ```
 
 **Orchestrator inputs:**
@@ -116,9 +132,15 @@ Computing ACF continuously during severe critical slowing down (CSD) is a statis
    producing a falsely small τ_int. Snapshots get harvested too frequently →
    correlated garbage.
 
-**Solution:** Run a dedicated **pilot** on a frozen block of 1M samples. Compute
-the FFT-based ACF on the *entire* block to find the true global mean and true τ_int.
-Lock that number, then start production.
+**Solution:** Always compute ACF on a frozen block of completed samples — never
+on a growing window. This happens at two points in the pipeline:
+
+1. **Pilot** (single-chain): ACF on ~1M sweeps per temperature. Produces a
+   naive τ_int that overestimates the true production value (no PT mixing).
+   Used only for ladder design.
+2. **Phase B** (PT, locked ladder): ACF on the equilibrated fixed-temperature
+   streams. Captures the true PT dynamics (replica exchanges shorten τ_int).
+   This τ_max is locked and used for production thinning in Phase C.
 
 ### Module Map
 
@@ -321,20 +343,25 @@ C_i = Σ_{k=0}^{i-1} w_k / Σ_{k=0}^{M-2} w_k     for i = 1, ..., M-1
 **Convergence criterion:** max_i |a_i - a_target| < tolerance, or max tuning rounds reached.
 Target acceptance rate: ~23% (optimal for adjacent-only swaps in 2D lattice models).
 
-#### Phase B — Equilibration
+#### Phase B — Equilibration & τ_int Measurement
 
 - **Ladder is LOCKED.** No more temperature adjustments. Adjusting temperatures
   during production violates detailed balance and invalidates the dataset.
 - Run sweeps + swaps until macroscopic observables stabilize.
 - Convergence check: sliding window (e.g., last 20% vs first 20% of window) — if means
   agree within tolerance for E and |M| at every replica, equilibration is complete.
+- **Measure true PT τ_int.** Once equilibrated, compute `tau_int_multi` on
+  the fixed-temperature observable streams collected during Phase B. This
+  captures the real PT autocorrelation (shortened by replica exchanges).
+  The resulting `τ_max` is locked and passed to Phase C for thinning.
+  - The pilot τ_int (§2.1) overestimates because it was single-chain.
+    It is only used for ladder design — never for production thinning.
 
 #### Phase C — Production
 
 - Harvest spin snapshots at each temperature slot.
 - **Thinning rule:** save one snapshot every `max(1, 3 × τ_max)` sweeps.
-  τ_max comes from the pilot run (§2.1). This is a conservative upper bound —
-  PT τ_int < single-chain τ_int — so we never under-thin.
+  τ_max comes from **Phase B** measurement on the locked PT ladder.
   Correlation between successive snapshots: e^{-3} ≈ 0.05 (safely independent).
 - **Stream to HDF5:** each snapshot is appended to the HDF5 file immediately
   (resizable dataset, flushed after each write). No in-memory buffering.
@@ -353,8 +380,8 @@ Target acceptance rate: ~23% (optimal for adjacent-only swaps in 2D lattice mode
 - [ ] Step 2.3.4: `_track_observables()` — record fixed-temperature stream data
 - [ ] Step 2.3.5: `RoundTripTracker` — replica tagging, T_min/T_max arrival detection, statistics
 - [ ] Step 2.3.6: `tune_ladder()` — Phase A: KTH feedback loop
-- [ ] Step 2.3.7: `equilibrate()` — Phase B: locked ladder, sliding-window convergence
-- [ ] Step 2.3.8: `produce()` — Phase C: snapshot harvesting with pilot-based thinning
+- [ ] Step 2.3.7: `equilibrate()` — Phase B: locked ladder, sliding-window convergence, measure true PT τ_int on equilibrated streams → lock τ_max
+- [ ] Step 2.3.8: `produce()` — Phase C: snapshot harvesting, thinned by Phase B τ_max
 
 ---
 

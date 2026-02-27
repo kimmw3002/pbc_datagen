@@ -1,6 +1,10 @@
 #!/usr/bin/env python
-"""Demo: Blume-Capel model at the tricritical point with observable time series."""
+"""Demo: Blume-Capel model with observable time series.
 
+Defaults to the tricritical point; use --T and --D to override.
+"""
+
+import argparse
 import time
 
 import matplotlib.pyplot as plt
@@ -12,32 +16,41 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+# --- CLI ---
+parser = argparse.ArgumentParser(description="Blume-Capel demo with observable plots")
+parser.add_argument("--T", type=float, default=0.609, help="Temperature (default: 0.609, tricritical)")
+parser.add_argument("--D", type=float, default=1.966, help="Crystal field (default: 1.966, tricritical)")
+parser.add_argument("--L", type=int, default=64, help="Lattice side length (default: 64)")
+parser.add_argument("--sweeps", type=int, default=1_000_000, help="Number of sweeps (default: 1000000)")
+parser.add_argument("--seed", type=int, default=42, help="RNG seed (default: 42)")
+args = parser.parse_args()
+
 console = Console()
 
 # --- simulation parameters ---
-L = 64
-N_SWEEPS = 1_000_000
+L = args.L
+N_SWEEPS = args.sweeps
 CHUNK = 10_000  # sweep in chunks so we can update the display
+T = args.T
+D = args.D
 
-# Tricritical point of the 2D Blume-Capel model (square lattice, J=1)
-# H = -J Σ s_i s_j + D Σ s_i²
-# Values from Kwak et al. (2015) / Silva et al. (2006)
-T_TRI = 0.609
-D_TRI = 1.966
+# Detect whether we're at the tricritical point
+is_tricritical = T == 0.609 and D == 1.966
+point_label = "(tricritical point)" if is_tricritical else ""
 
 console.print(
     Panel(
         f"[bold]L={L}[/]  |  [bold]N={L * L:,}[/] spins  |  "
         f"[bold]{N_SWEEPS:,}[/] sweeps\n"
-        f"T={T_TRI} , D={D_TRI}  (tricritical point)",
+        f"T={T} , D={D}  {point_label}",
         title="[bold cyan]Blume-Capel Demo[/]",
         border_style="cyan",
     )
 )
 
-model = BlumeCapelModel(L, seed=42)
-model.set_temperature(T_TRI)
-model.set_crystal_field(D_TRI)
+model = BlumeCapelModel(L, seed=args.seed)
+model.set_temperature(T)
+model.set_crystal_field(D)
 
 # --- warmup ---
 with Progress(
@@ -141,7 +154,7 @@ q_thin = quad[::thin]
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 8), sharex=True)
 fig.suptitle(
-    f"Blume-Capel  L={L}  T={T_TRI}  D={D_TRI}  (tricritical point)",
+    f"Blume-Capel  L={L}  T={T}  D={D}  {point_label}",
     fontsize=13,
     fontweight="bold",
 )
@@ -185,7 +198,7 @@ ax.legend(fontsize=8)
 ax.set_title("Quadrupole (vacancy order parameter)")
 
 fig.tight_layout()
-out_path = "blume_capel_tricritical.png"
+out_path = f"blume_capel_L{L}_T{T}_D{D}.png"
 fig.savefig(out_path, dpi=150)
 console.print(f"[green]Saved → {out_path}[/]")
 plt.show()
