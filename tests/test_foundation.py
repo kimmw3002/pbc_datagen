@@ -105,6 +105,55 @@ def test_rng_rand_below_stays_in_range() -> None:
         assert all(0 <= v < n for v in values), f"rand_below({n}) produced out-of-range value"
 
 
+def test_rng_rand_below_uniformity() -> None:
+    """rand_below(n) must produce a uniform distribution over [0, n).
+
+    We use n = 128*128 = 16384 (a typical lattice size) and draw enough
+    samples so each bin has ~100 expected counts, then chi-squared test.
+    """
+    from pbc_datagen._core import Rng
+    from scipy.stats import chisquare
+
+    n = 128 * 128
+    samples_per_bin = 100
+    N = n * samples_per_bin  # 1_638_400 total samples
+
+    rng = Rng(seed=2025)
+    counts = np.zeros(n, dtype=np.int64)
+    for _ in range(N):
+        counts[rng.rand_below(n)] += 1
+
+    expected = np.full(n, samples_per_bin, dtype=np.float64)
+    result = chisquare(counts, expected)
+    assert result.pvalue > 0.001, (
+        f"rand_below({n}) uniformity failed: chi2={result.statistic:.1f}, p={result.pvalue:.6f}"
+    )
+
+
+def test_rng_rand_below_autocorrelation() -> None:
+    """Consecutive rand_below() outputs must be uncorrelated at short lags.
+
+    We draw 500k samples from rand_below(128*128), center the sequence,
+    and check that the autocorrelation at lags 1–20 is within 4 sigma of zero.
+    """
+    from pbc_datagen._core import Rng
+
+    n = 128 * 128
+    N = 500_000
+    rng = Rng(seed=555)
+    samples = np.array([rng.rand_below(n) for _ in range(N)], dtype=np.float64)
+
+    x = samples - samples.mean()
+    var = np.dot(x, x)
+
+    threshold = 4.0 / np.sqrt(N)  # ~4 sigma
+    for lag in range(1, 21):
+        acf = np.dot(x[:-lag], x[lag:]) / var
+        assert abs(acf) < threshold, (
+            f"rand_below autocorrelation at lag {lag} = {acf:.5f}, exceeds ±{threshold:.5f}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Neighbor-table tests  (Step 1.0.3)
 # ---------------------------------------------------------------------------
