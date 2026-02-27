@@ -19,7 +19,7 @@ Tests: `tests/ising/` — test_model.py, test_wolff.py, test_metropolis.py, test
 
 ### 1.2 Blume-Capel Model
 - [x] Step 1.2.1: `blume_capel.hpp` + `blume_capel.cpp` — BlumeCapelModel struct, constructor, set_temperature, set_crystal_field, energy, magnetization, abs_magnetization, quadrupole, set_spin
-- [ ] Step 1.2.2: `_wolff_step()` — Wolff single-cluster flip (spin-0 sites are "dead" barriers)
+- [x] Step 1.2.2: `_wolff_step()` — Wolff single-cluster flip (spin-0 sites are "dead" barriers)
 - [ ] Step 1.2.3: `_metropolis_sweep()` — N random-site proposals over {-1, 0, +1} with crystal field D
 - [ ] Step 1.2.4: `sweep()` = Wolff + Metropolis, observable tracking (E, M, |M|, Q)
 
@@ -231,7 +231,7 @@ The manager should auto-select based on `L` and `n_replicas`, or accept a `paral
 - [x] Unit: Ising Wolff detailed balance (2×2 chi-squared at 10 temperatures) — `tests/ising/test_wolff.py`
 - [x] Unit: Ising Metropolis detailed balance (2×2 chi-squared at 10 temperatures) — `tests/ising/test_metropolis.py`
 - [x] Unit: Ising sweep detailed balance + ergodicity — `tests/ising/test_sweep.py`
-- [ ] Unit: BC Wolff — vacancy barrier, cluster on pure ±1 matches Ising, seed-on-vacancy returns 0 — `tests/blume_capel/test_wolff.py`
+- [x] Unit: BC Wolff — vacancy barrier, cluster on pure ±1 matches Ising, seed-on-vacancy returns 0 — `tests/blume_capel/test_wolff.py`
 - [ ] Unit: BC Metropolis — `_delta_energy` correctness, 2×2 detailed balance (81 states) — `tests/blume_capel/test_metropolis.py`
 - [ ] Unit: BC sweep — detailed balance + ergodicity, observables dict includes Q — `tests/blume_capel/test_sweep.py`
 - [ ] Unit: AT energy/magnetization consistency after sweep

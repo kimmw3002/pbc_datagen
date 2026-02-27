@@ -87,4 +87,60 @@ double BlumeCapelModel::quadrupole() const {
     return static_cast<double>(sq_sum) / N;
 }
 
+int BlumeCapelModel::_wolff_step() {
+    // Pick a random seed site
+    int seed = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+    int8_t seed_spin = spin[static_cast<size_t>(seed)];
+
+    // Vacancies can't seed clusters — return immediately
+    if (seed_spin == 0) {
+        return 0;
+    }
+
+    // Bond activation probability — identical to Ising.
+    // D doesn't enter here because (-s)² = s²: the crystal-field
+    // contribution cancels exactly when a cluster is flipped.
+    double p_add = 1.0 - std::exp(-2.0 / T_);
+
+    // Track which sites belong to the cluster
+    std::vector<bool> in_cluster(static_cast<size_t>(N), false);
+
+    // Explicit DFS stack (not recursion — avoids stack overflow on large lattices)
+    std::vector<int> stack;
+    stack.push_back(seed);
+    in_cluster[static_cast<size_t>(seed)] = true;
+    int cluster_size = 0;
+
+    while (!stack.empty()) {
+        int site = stack.back();
+        stack.pop_back();
+        ++cluster_size;
+
+        // Try to add each of the 4 neighbors
+        for (int d = 0; d < 4; ++d) {
+            int j = nbr[static_cast<size_t>(site * 4 + d)];
+            // Neighbor must: (1) not already be in cluster,
+            //                (2) have the same spin as the seed (±1),
+            //                (3) pass the bond activation coin flip.
+            // Spin-0 neighbors naturally fail check (2) and act as barriers.
+            if (!in_cluster[static_cast<size_t>(j)]
+                && spin[static_cast<size_t>(j)] == seed_spin
+                && rng.uniform() < p_add) {
+                in_cluster[static_cast<size_t>(j)] = true;
+                stack.push_back(j);
+            }
+        }
+    }
+
+    // Flip every spin in the cluster: s → -s
+    for (int i = 0; i < N; ++i) {
+        if (in_cluster[static_cast<size_t>(i)]) {
+            spin[static_cast<size_t>(i)] =
+                static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
+        }
+    }
+
+    return cluster_size;
+}
+
 }  // namespace pbc

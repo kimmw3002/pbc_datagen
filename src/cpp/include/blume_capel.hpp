@@ -58,6 +58,22 @@ struct BlumeCapelModel {
     // Quadrupole order parameter:  Q = (1/N) Σ_i s_i².
     // Q = 1 when all sites are magnetic (±1), Q = 0 when all vacant.
     double quadrupole() const;
+
+    // Wolff single-cluster update, adapted for 3-state spins.
+    //
+    // If the random seed lands on a vacancy (spin = 0), returns 0
+    // immediately — vacancies can't seed clusters.
+    //
+    // Otherwise, grows a cluster via DFS through neighbors with the
+    // same spin as the seed (±1).  Spin-0 sites fail the alignment
+    // check and act as natural barriers that fragment the lattice.
+    //
+    // Bond probability: p_add = 1 - exp(-2J/T), identical to Ising.
+    // The crystal field D does NOT affect Wolff bonds because
+    // (-s)² = s²; the D·s² term cancels exactly under cluster flip.
+    //
+    // Returns the cluster size (0 if seed was vacant).
+    int _wolff_step();
 };
 
 }  // namespace pbc

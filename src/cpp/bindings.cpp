@@ -104,5 +104,6 @@ PYBIND11_MODULE(_core, m) {
         .def("energy", &pbc::BlumeCapelModel::energy)
         .def("magnetization", &pbc::BlumeCapelModel::magnetization)
         .def("abs_magnetization", &pbc::BlumeCapelModel::abs_magnetization)
-        .def("quadrupole", &pbc::BlumeCapelModel::quadrupole);
+        .def("quadrupole", &pbc::BlumeCapelModel::quadrupole)
+        .def("_wolff_step", &pbc::BlumeCapelModel::_wolff_step);
 }
