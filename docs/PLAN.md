@@ -64,12 +64,85 @@ they never hardcode observable names. This means adding a new observable to a
 model automatically gets picked up by thinning (bottleneck rule) without
 changing any Python orchestration code.
 
-## Phase 2: Parallel Tempering & Python Orchestration
+## Phase 2: Orchestration Pipeline
 
-### 2.0 Autocorrelation Utility (prerequisite for Phase C)
-- [ ] Step 2.0.1: `autocorrelation.py` — FFT-based autocorrelation function + τ_int via first zero crossing
+### Architecture Overview
 
-#### τ_int Calculation Method
+Three-stage pipeline. Each stage is a separate module with a clean public API for TDD.
+
+```
+ Orchestrator
+ ┌──────────────────────────────────────────────────────────┐
+ │  For each param value (e.g. D) in linspace:              │
+ │                                                          │
+ │  ┌─────────┐     ┌──────────┐     ┌──────────────────┐  │
+ │  │  Pilot   │────▶│  Ladder  │────▶│  PT Production   │  │
+ │  │  Run     │     │  Design  │     │  (A → B → C)     │  │
+ │  └─────────┘     └──────────┘     └──────────────────┘  │
+ │       │                                    │             │
+ │       │         ┌──────────────┐           │             │
+ │       └────────▶│ Autocorrel.  │◀──────────┘             │
+ │                 └──────────────┘                         │
+ │                        │                                 │
+ │                 ┌──────▼──────┐                          │
+ │                 │  HDF5 I/O   │                          │
+ │                 └─────────────┘                          │
+ └──────────────────────────────────────────────────────────┘
+```
+
+**Orchestrator inputs:**
+```python
+generate_dataset(
+    model_type: str,                        # "ising" | "blume_capel" | "ashkin_teller"
+    L: int,                                 # lattice linear size
+    param_range: tuple[float, float, int],  # (start, end, num) → np.linspace
+    T_range: tuple[float, float],           # (T_min, T_max); ΔT auto-selected
+    max_workers: int = 4,                   # CPU cores available
+    pilot_sweeps: int = 1_000_000,          # sweeps per pilot point
+    output_path: str = "dataset.h5",
+)
+```
+
+For Ising (no Hamiltonian parameter beyond T), `param_range` is a single dummy value
+`(0.0, 0.0, 1)`. For Blume-Capel, it sweeps D. For Ashkin-Teller, the 4-spin coupling.
+
+### Why Not On-The-Fly ACF
+
+Computing ACF continuously during severe critical slowing down (CSD) is a statistical trap:
+
+1. **Biased mean:** The ACF formula depends on the sample mean Ō. If the running
+   window N < 10×τ_int, the simulation hasn't explored phase space — Ō is wrong.
+2. **Artificial decorrelation:** A biased Ō makes ρ(t) cross zero prematurely,
+   producing a falsely small τ_int. Snapshots get harvested too frequently →
+   correlated garbage.
+
+**Solution:** Run a dedicated **pilot** on a frozen block of 1M samples. Compute
+the FFT-based ACF on the *entire* block to find the true global mean and true τ_int.
+Lock that number, then start production.
+
+### Module Map
+
+```
+python/pbc_datagen/
+├── autocorrelation.py      # FFT-based ACF + τ_int
+├── pilot.py                # Single-chain τ_int profiling         ← NEW
+├── ladder.py               # PT ladder design from pilot data     ← NEW
+├── parallel_tempering.py   # PT engine + round-trip tracking      ← NEW
+├── orchestrator.py         # Top-level coordinator (redesigned)
+└── io.py                   # HDF5 snapshot writer
+```
+
+---
+
+### 2.0 Autocorrelation Utility
+
+File: `python/pbc_datagen/autocorrelation.py`
+
+- [ ] Step 2.0.1: `acf_fft(x)` — FFT-based normalized autocorrelation function
+- [ ] Step 2.0.2: `tau_int(x)` — integrated autocorrelation time via first zero crossing
+- [ ] Step 2.0.3: `tau_int_multi(sweep_dict)` — τ_int for every key in a `sweep()` result dict; returns per-observable τ_int values and the bottleneck τ_max
+
+#### ACF Math
 
 **Autocorrelation function** for observable time series O of length N:
 ```
@@ -91,18 +164,87 @@ where `t_cut` = first lag where ρ(t) ≤ 0 (first zero crossing). Simple, robus
 then use `τ_max = max(τ_E, τ_{|M|}, τ_Q, ...)`. Thin at intervals ≥ 3×τ_max.
 Near the tricritical point in BC, τ_Q (quadrupole/vacancy density) will be the bottleneck.
 
-### 2.1 Parallel Tempering Manager
+---
+
+### 2.1 Pilot Run
+
+File: `python/pbc_datagen/pilot.py`
+
+The pilot run serves two purposes:
+1. **τ_int profiling:** determine worst-case τ_int across all observables and
+   temperatures → locked thinning interval for production.
+2. **Energy distributions:** E(T) histograms at each temperature → input for
+   PT ladder design (§2.2).
+
+#### Method
+
+For each Hamiltonian parameter value (e.g., each D):
+- Run single-chain MCMC at a grid of temperatures (e.g., 50 points from T_min to T_max).
+- At each T: run `pilot_sweeps` (default 1M) sweeps using the model's `sweep()`.
+  Store full observable arrays in memory.
+- Compute FFT-based ACF (§2.0) on the entire frozen block for each observable.
+- Extract τ_int for each observable at each T.
+- Record `τ_max(T) = max(τ_int across observables)` at each T.
+- Record energy histograms for ladder design.
+
+#### Parallelization
+
+Each `(param_value, T)` pair is a fully independent single-chain run.
+Distribute across `max_workers` via `multiprocessing.Pool.map`.
+
+Since pybind11 model objects are NOT picklable, each worker constructs its own
+model instance. Workers receive `(model_type, L, param_value, T, n_sweeps, seed)`
+and return `(T, observable_arrays, energy_histogram)`.
+
+#### Steps
+
+- [ ] Step 2.1.1: `pilot_single(model_type, L, params, T, n_sweeps, seed)` — run one point, return observables + energy histogram
+- [ ] Step 2.1.2: `pilot_sweep(model_type, L, params, T_grid, n_sweeps, max_workers)` — parallel pilot across all T for one param set
+- [ ] Step 2.1.3: `PilotResult` dataclass — τ_int(T) per observable, energy histograms, worst-case τ_max
+
+---
+
+### 2.2 PT Ladder Design
+
+File: `python/pbc_datagen/ladder.py`
+
+Given pilot energy distributions and a replica budget, compute the optimal β ladder.
+
+**Inputs:**
+- Pilot energy histograms E(T) at each pilot temperature
+- `max_replicas`: upper bound on ladder size
+- `T_min`, `T_max`: temperature endpoints (fixed)
+
+**Method:**
+1. Compute energy-distribution overlap between each pair of adjacent pilot temperatures.
+2. Inverse-overlap weighting (same principle as KTH):
+   ```
+   w_i = 1 / max(overlap(T_i, T_{i+1}), ε)    (poor overlap → high weight)
+   C_i = Σ_{k<i} w_k / Σ_all w_k              (cumulative resistance)
+   β_i = β_min + C_i × (β_max - β_min)         (new β positions)
+   ```
+3. Concentrate replicas near phase transitions (poor overlap → more replicas).
+4. Constrain to `max_replicas` points.
+
+**Output:** `np.ndarray` of β values (length ≤ max_replicas), sorted.
+
+This gives the PT engine (§2.3) a *warm start* — the initial ladder is already
+near-optimal, so Phase A (KTH tuning) converges quickly rather than starting
+from a blind geometric spacing.
+
+#### Steps
+
+- [ ] Step 2.2.1: `energy_overlap(hist_i, hist_j)` — histogram overlap metric between two temperature points
+- [ ] Step 2.2.2: `design_ladder(pilot_result, max_replicas, T_min, T_max)` — compute optimal β array
+- [ ] Step 2.2.3: Overlap quality check — warn if any adjacent pair has overlap below threshold
+
+---
+
+### 2.3 Parallel Tempering Engine
 
 File: `python/pbc_datagen/parallel_tempering.py`
 
-Model-agnostic: works with any model conforming to the **Model Interface** (see above).
-
-- [ ] Step 2.1.1: Core `ParallelTemperingManager` class — replica creation, geometric β ladder init
-- [ ] Step 2.1.2: Exchange logic — adjacent-only swaps with even/odd alternation
-- [ ] Step 2.1.3: Phase A (Ladder Tuning) — dynamic temperature adjustment with KTH feedback
-- [ ] Step 2.1.4: Phase B (Equilibration) — locked ladder, convergence monitoring
-- [ ] Step 2.1.5: Phase C (Production) — snapshot harvesting with τ_int-based thinning
-- [ ] Step 2.1.6: Multiprocessing support — optional `multiprocessing.Pool` for large systems
+Model-agnostic PT engine. Works with any model conforming to the **Model Interface** (see above).
 
 #### Exchange Logic
 
@@ -119,24 +261,51 @@ A = min(1, exp(Δβ × ΔE))
 On acceptance: swap spin configurations (numpy array copy), NOT temperature labels.
 This preserves the identity of each temperature slot.
 
-#### Phase A — Dynamic Temperature Ladder Optimization (Katzgraber-Trebst-Huse 2006)
+#### Fixed-Temperature Stream Tracking (not Fixed-Replica)
 
-**Why this matters:** A naive linearly/geometrically spaced ladder fails at phase transitions
-where the heat capacity spikes. The energy distributions of adjacent replicas stop overlapping
-and the swap acceptance rate drops to zero, breaking replica flow through temperature space.
+**Critical distinction:** observables and snapshots must be tracked at each
+**temperature slot** (e.g., "whatever replica currently sits at T = 2.269"),
+NOT at each physical replica.
+
+- When replicas swap, a new lattice configuration enters the temperature slot.
+- The fixed-temperature stream belongs to a single canonical ensemble.
+- PT teleports decorrelated configurations from the hot end, reducing τ_int
+  compared to single-chain MCMC. This is the whole point.
+- **Do NOT track a specific replica across temperatures** — its observables
+  change with T and don't belong to any single ensemble.
+
+#### Round-Trip Time Tracking
+
+Even if the fixed-temperature ACF looks small, PT may be broken: replicas
+might swap locally (bouncing between T₀ and T₁) but never traverse the full
+ladder. Bottleneck configurations never reach hot temperatures to melt.
+
+**Track round-trip time (t_RT):**
+1. Tag each replica with a persistent ID.
+2. When a replica reaches T_min, mark it "released upward."
+3. Track sweep count until it reaches T_max and returns to T_min.
+4. Production run must allow dozens of complete round-trips per replica.
+5. If mean t_RT is comparable to total production length → dataset is suspect.
+
+#### Phase A — Ladder Tuning (Katzgraber-Trebst-Huse 2006)
+
+The pilot (§2.1) provides a warm-start ladder. Phase A fine-tunes it in situ.
+
+**Why this matters:** Even the pilot-informed ladder may not be perfect — the
+pilot ran single-chain, but PT energy distributions shift due to replica mixing.
+KTH feedback closes the gap.
 
 **Algorithm:**
-1. Initialize M replicas with geometric inverse-temperature spacing:
-   `β_i = β_min × (β_max/β_min)^(i/(M-1))`
+1. Start from the pilot-designed ladder (§2.2), NOT a blind geometric spacing.
 2. Run `n_tune` rounds of (sweeps + swap attempts).
 3. Track empirical swap acceptance rates via exponential moving average:
    `a_i ← (1 - α) × a_i + α × measured_i`    (α ≈ 0.1)
 4. Every `update_interval` rounds, redistribute β values:
 
-**Feedback formula (the key math):**
+**Feedback formula:**
 ```
 ε = 0.05                          # floor to prevent division by zero
-w_i = 1 / max(a_i, ε)             # "resistance" of gap i (low acceptance = high resistance)
+w_i = 1 / max(a_i, ε)             # "resistance" of gap i
 
 # Cumulative resistance determines new β positions:
 C_0 = 0
@@ -149,56 +318,216 @@ C_i = Σ_{k=0}^{i-1} w_k / Σ_{k=0}^{M-2} w_k     for i = 1, ..., M-1
 β_i^new = (1 - γ) × β_i^old + γ × β_i^target     (γ ≈ 0.3)
 ```
 
-This concentrates replicas near phase transitions where energy distributions barely overlap
-(high resistance → more replicas inserted). Regions with easy swaps get sparser coverage.
-
 **Convergence criterion:** max_i |a_i - a_target| < tolerance, or max tuning rounds reached.
 Target acceptance rate: ~23% (optimal for adjacent-only swaps in 2D lattice models).
 
 #### Phase B — Equilibration
 
-- **Ladder is LOCKED.** No more temperature adjustments. This is critical: adjusting
-  temperatures during production violates detailed balance and invalidates the dataset.
+- **Ladder is LOCKED.** No more temperature adjustments. Adjusting temperatures
+  during production violates detailed balance and invalidates the dataset.
 - Run sweeps + swaps until macroscopic observables stabilize.
 - Convergence check: sliding window (e.g., last 20% vs first 20% of window) — if means
   agree within tolerance for E and |M| at every replica, equilibration is complete.
 
 #### Phase C — Production
 
-- Harvest spin snapshots at each temperature point.
-- Compute τ_int for EVERY observable in the `sweep()` dict (from autocorrelation.py).
-- **Bottleneck rule:** `τ_max = max(τ_obs for obs in sweep_dict.keys())`.
-  Near T_c the bottleneck is typically |M|; near the BC tricritical point it's Q.
+- Harvest spin snapshots at each temperature slot.
 - **Thinning rule:** save one snapshot every `max(1, 3 × τ_max)` sweeps.
+  τ_max comes from the pilot run (§2.1). This is a conservative upper bound —
+  PT τ_int < single-chain τ_int — so we never under-thin.
   Correlation between successive snapshots: e^{-3} ≈ 0.05 (safely independent).
-- Store snapshots with metadata: (T, D, L, seed, sweep_index, τ_max, per-observable τ_int).
+- **Stream to HDF5:** each snapshot is appended to the HDF5 file immediately
+  (resizable dataset, flushed after each write). No in-memory buffering.
+  If the process crashes, all snapshots collected so far are safely on disk.
+- **Checkpoint after each snapshot batch:** update a JSON sidecar file with
+  `sweep_index`, per-slot snapshot counts, and save replica spin states into
+  an HDF5 `_checkpoint/` group. On resume, restore replicas and continue
+  from the last checkpoint — no need to re-run pilot or ladder design.
+- Track round-trip times continuously. Log warnings if round-trips stall.
 
-#### Multiprocessing Design
+#### Steps
 
-pybind11 model objects are NOT picklable. Two approaches:
+- [ ] Step 2.3.1: `PTEngine.__init__` — replica creation from β ladder, model factory
+- [ ] Step 2.3.2: `_sweep_all()` — sweep all replicas (parallelized across workers, see §2.4)
+- [ ] Step 2.3.3: `_attempt_exchanges()` — even/odd adjacent Metropolis swaps
+- [ ] Step 2.3.4: `_track_observables()` — record fixed-temperature stream data
+- [ ] Step 2.3.5: `RoundTripTracker` — replica tagging, T_min/T_max arrival detection, statistics
+- [ ] Step 2.3.6: `tune_ladder()` — Phase A: KTH feedback loop
+- [ ] Step 2.3.7: `equilibrate()` — Phase B: locked ladder, sliding-window convergence
+- [ ] Step 2.3.8: `produce()` — Phase C: snapshot harvesting with pilot-based thinning
 
-**Option A — Process-per-replica (preferred for large L):**
-Each worker process owns its own model instance. After sweeps, workers send
-`(energy, spins_as_numpy)` back to the main process via `multiprocessing.Queue`.
-Main process makes swap decisions and sends back `(new_temperature, new_spins)` or no-op.
+---
 
-**Option B — Sequential (simpler, fine for small L):**
-Single process, loop over replicas. For L ≤ 64, sweep() takes ~μs and the overhead
-of process synchronization likely exceeds the computation itself.
+### 2.4 Worker Allocation & Scheduling
 
-The manager should auto-select based on `L` and `n_replicas`, or accept a `parallel=True/False` flag.
+**Key insight:** PT requires all replicas to *exist* simultaneously for exchanges,
+but does NOT require them to sweep in parallel. Parallelism is a performance
+optimization, not a correctness requirement.
 
-### 2.2 I/O & CLI
-- [ ] Step 2.2.1: `io.py` — HDF5 snapshot writer with metadata (T, D, L, seed, τ_int)
-- [ ] Step 2.2.2: `generate_dataset.py` — CLI entry point orchestrating PT runs
+#### Intra-PT (replicas within one PT run)
+
+Each sweep round distributes R replicas across W workers:
+
+- **R ≤ W:** One replica per worker, all sweep in parallel. Simple.
+- **R > W:** Sweep in `ceil(R/W)` batches of W. After *all* batches complete,
+  do exchanges. The algorithm is identical — just `ceil(R/W)` times slower
+  per round than having R workers.
+
+Workers own their model instances (pybind11 objects aren't picklable).
+Each worker holds `ceil(R/W)` replicas and sweeps them sequentially within
+its process. After all workers finish, the main process collects
+`(replica_id, energy, spins)`, makes exchange decisions, and sends back
+`(new_T, new_spins)` or no-op.
+
+#### Inter-PT (across Hamiltonian parameter values)
+
+Each param value (e.g., D) runs an independent PT campaign. The outer loop is
+sequential by default. If `R_per_campaign < W`, the system could run
+`floor(W / R_per_campaign)` campaigns simultaneously, but this adds complexity
+and is deferred to a future optimization.
+
+#### Pilot Parallelism
+
+Each `(param_value, T)` pair is fully independent → distribute across W workers
+via `Pool.map`. Trivially parallel — no batching needed.
+
+#### Steps
+
+- [ ] Step 2.4.1: `WorkerPool` class — manages replica-to-worker assignment, batched sweep dispatch, result collection
+- [ ] Step 2.4.2: Integration with `PTEngine._sweep_all()` — plug WorkerPool in
+
+---
+
+### 2.5 Orchestrator
+
+File: `python/pbc_datagen/orchestrator.py`
+
+Top-level coordinator: pilot → ladder → PT → I/O.
+
+```python
+def generate_dataset(
+    model_type: str,                        # "ising" | "blume_capel" | "ashkin_teller"
+    L: int,                                 # lattice linear size
+    param_range: tuple[float, float, int],  # (start, end, num) → np.linspace
+    T_range: tuple[float, float],           # (T_min, T_max)
+    max_workers: int = 4,
+    pilot_sweeps: int = 1_000_000,
+    output_path: str = "dataset.h5",
+) -> None: ...
+```
+
+For each param value in `linspace(start, end, num)`:
+1. **Pilot** (§2.1) → `PilotResult` (τ_int profiles, energy histograms)
+2. **Ladder** (§2.2) → β array (length ≤ max_workers)
+3. **PT** (§2.3) → Phase A (tune) → Phase B (equilibrate) → Phase C (produce)
+
+Steps 1–2 are cheap relative to production and are always re-run on resume.
+Only Phase C (production) is resumable.
+
+#### Checkpoint / Resume Protocol
+
+Checkpoint file: `{output_path}.checkpoint.json` (sibling of the HDF5 file).
+Written after every snapshot batch during Phase C.
+
+```json
+{
+  "model_type": "blume_capel",
+  "L": 64,
+  "completed_params": [0.0, 0.5, 1.0],
+  "current_param": {
+    "value": 1.5,
+    "beta_ladder": [0.30, 0.35, 0.40, "..."],
+    "tau_max": 42.7,
+    "sweep_index": 15000,
+    "n_snapshots": {"2.269": 84, "2.300": 84, "...": "..."}
+  }
+}
+```
+
+Replica spin states are binary data — stored in the HDF5 file under a
+`_checkpoint/{param_value}/` group, NOT in JSON. Deleted once the param
+value's production completes.
+
+**On resume:**
+1. Load checkpoint JSON.
+2. Skip all `completed_params` — their snapshots are already in the HDF5.
+3. For `current_param`: reload β ladder + τ_max, restore replica spins from
+   HDF5 `_checkpoint/`, continue Phase C from `sweep_index`.
+4. For remaining params: run full pilot → ladder → production.
+5. On clean completion of all params: delete checkpoint JSON and
+   HDF5 `_checkpoint/` groups.
+
+#### Steps
+
+- [ ] Step 2.5.1: `generate_dataset()` — main entry point implementing the above loop
+- [ ] Step 2.5.2: Progress reporting and logging (per-D, per-phase)
+- [ ] Step 2.5.3: `save_checkpoint()` / `load_checkpoint()` — JSON sidecar + HDF5 replica state
+- [ ] Step 2.5.4: Resume logic — detect existing checkpoint, skip completed params, restore in-progress
+
+---
+
+### 2.6 I/O
+
+File: `python/pbc_datagen/io.py`
+
+#### HDF5 Streaming Writes
+
+Snapshots are streamed to HDF5 during production — **not** buffered in memory.
+For large L and long runs, holding all snapshots in RAM is infeasible.
+
+**HDF5 layout:**
+```
+dataset.h5
+├── blume_capel/                        # model group
+│   ├── D=0.000/                        # param value group
+│   │   ├── T=2.269/
+│   │   │   ├── snapshots               # (N, L, L) int8, resizable axis 0
+│   │   │   └── .attrs                  # τ_int, τ_max, seed, round_trip_stats
+│   │   ├── T=2.300/
+│   │   │   └── ...
+│   │   └── .attrs                      # locked β ladder, pilot τ_max
+│   └── D=1.965/
+│       └── ...
+└── _checkpoint/                        # replica spins for resume
+    └── D=1.500/                        # (deleted on param completion)
+        └── replica_spins               # (R, L, L) int8
+```
+
+**Streaming protocol:**
+1. `create_temperature_slot(path, T, L)` → creates group + resizable dataset
+   with `maxshape=(None, L, L)`, `dtype=int8`, `chunks=(1, L, L)`.
+2. `append_snapshot(path, T, spins)` → `dset.resize(n+1, axis=0); dset[n] = spins`.
+3. `file.flush()` after each append for crash safety.
+4. `save_replica_state(path, param, spins_list)` → write `_checkpoint/` group.
+5. `finalize_param(path, param)` → write final metadata attrs, delete `_checkpoint/` group.
+
+#### Steps
+
+- [ ] Step 2.6.1: `SnapshotWriter` class — open/create HDF5, create groups, streaming append with flush
+- [ ] Step 2.6.2: `save_replica_state()` / `load_replica_state()` — checkpoint binary data in HDF5
+- [ ] Step 2.6.3: `finalize_param()` — write metadata attrs, clean up `_checkpoint/`
+- [ ] Step 2.6.4: `SnapshotReader` class — load snapshots by `(model, param, T)` query
+- [ ] Step 2.6.5: `dataset_summary()` — list available `(model, param, T, n_snapshots)`
+
+---
+
+### 2.7 CLI Entry Point
+
+File: `scripts/generate_dataset.py`
+
+- [ ] Step 2.7.1: argparse CLI wrapping `generate_dataset()` with all parameters
 
 ## Phase 3: Validation & Diagnostics
 
 - [ ] Step 3.1: `validation.py` — equilibration trace plots (E, M vs sweep)
 - [ ] Step 3.2: `validation.py` — cluster scaling check ⟨n⟩ ~ L^{y_h}
-- [ ] Step 3.3: Replica flow diagnostics — round-trip time histogram, per-gap acceptance plot
+- [ ] Step 3.3: Round-trip diagnostics — t_RT histogram, replica diffusion plot
+- [ ] Step 3.4: Per-gap acceptance rate plot (should be uniform after KTH tuning)
+- [ ] Step 3.5: Pilot τ_int profile plot — τ_int(T) for each observable, highlighting bottleneck
 
 ## Test Plan
+
+### Phase 1 Tests (completed)
 
 - [x] Unit: PRNG smoke test (determinism, range, uniformity, autocorrelation) — `tests/test_foundation.py`
 - [x] Unit: Neighbor table correctness for various L (shape, PBC, symmetry) — `tests/test_foundation.py`
@@ -210,11 +539,65 @@ The manager should auto-select based on `L` and `n_replicas`, or accept a `paral
 - [x] Unit: BC Metropolis — `_delta_energy` correctness, 2×2 detailed balance (81 states) — `tests/blume_capel/test_metropolis.py`
 - [x] Unit: BC sweep — detailed balance + ergodicity, observables dict includes Q — `tests/blume_capel/test_sweep.py`
 - [ ] Unit: AT energy/magnetization consistency after sweep
-- [ ] Unit: ACF + τ_int on synthetic AR(1) signal (known τ), first-zero-crossing cutoff — `tests/test_autocorrelation.py`
-- [ ] Unit: PT swap acceptance matches exact Boltzmann formula — `tests/test_parallel_tempering.py`
-- [ ] Unit: PT ladder tuning converges to uniform acceptance — `tests/test_parallel_tempering.py`
-- [ ] Unit: PT phase separation — no ladder changes during Phase B/C — `tests/test_parallel_tempering.py`
-- [ ] Integration: Full pipeline — PT equilibrate, measure τ_int, generate thinned snapshots
+
+### Phase 2 Tests — Autocorrelation (`tests/test_autocorrelation.py`)
+
+- [ ] Unit: `acf_fft` on synthetic AR(1) signal matches known analytical ACF
+- [ ] Unit: `tau_int` on AR(1) with known τ recovers correct value within tolerance
+- [ ] Unit: `tau_int` on white noise returns ≈ 0.5
+- [ ] Unit: `tau_int_multi` returns per-observable dict and correct bottleneck τ_max
+
+### Phase 2 Tests — Pilot (`tests/test_pilot.py`)
+
+- [ ] Unit: `pilot_single` runs correct number of sweeps and returns expected observable keys
+- [ ] Unit: `pilot_single` energy histogram has correct bin range for model
+- [ ] Unit: `pilot_sweep` distributes work across workers (mock Pool to verify)
+- [ ] Unit: `PilotResult` τ_int profile shape matches T_grid length
+
+### Phase 2 Tests — Ladder (`tests/test_ladder.py`)
+
+- [ ] Unit: `energy_overlap` — identical histograms → 1.0, disjoint histograms → 0.0
+- [ ] Unit: `design_ladder` — more replicas near poor-overlap region than easy-overlap region
+- [ ] Unit: `design_ladder` — respects `max_replicas` constraint exactly
+- [ ] Unit: `design_ladder` — endpoints match T_min and T_max
+
+### Phase 2 Tests — PT Engine (`tests/test_parallel_tempering.py`)
+
+- [ ] Unit: Exchange acceptance matches exact Boltzmann formula (deterministic test)
+- [ ] Unit: Even/odd alternation covers all gaps over 2 rounds
+- [ ] Unit: Fixed-temperature stream records the configuration currently *at* that T slot
+- [ ] Unit: `RoundTripTracker` detects a completed min→max→min trip
+- [ ] Unit: `RoundTripTracker` does NOT count incomplete trips
+- [ ] Unit: KTH tuning converges toward uniform acceptance on a known test case
+- [ ] Unit: Ladder is immutable during Phase B and Phase C (no β changes)
+
+### Phase 2 Tests — Worker Pool (`tests/test_worker_pool.py`)
+
+- [ ] Unit: R ≤ W → one batch, all replicas in parallel
+- [ ] Unit: R > W → ceil(R/W) batches, each batch ≤ W replicas
+- [ ] Unit: Worker results collected correctly after batched dispatch
+
+### Phase 2 Tests — I/O (`tests/test_io.py`)
+
+- [ ] Unit: `SnapshotWriter` creates correct HDF5 group hierarchy
+- [ ] Unit: `append_snapshot` grows dataset by 1 along axis 0, data matches
+- [ ] Unit: `save_replica_state` / `load_replica_state` round-trips spin arrays exactly
+- [ ] Unit: `finalize_param` writes attrs and deletes `_checkpoint/` group
+- [ ] Unit: `SnapshotReader` loads correct slice by `(model, param, T)`
+
+### Phase 2 Tests — Checkpoint / Resume (`tests/test_checkpoint.py`)
+
+- [ ] Unit: `save_checkpoint` writes valid JSON with expected keys
+- [ ] Unit: `load_checkpoint` restores completed_params and current_param state
+- [ ] Unit: Resume skips completed params and continues from sweep_index
+- [ ] Unit: Clean completion deletes checkpoint JSON and `_checkpoint/` HDF5 groups
+
+### Phase 2 Tests — Integration (`tests/test_integration.py`)
+
+- [ ] Integration: Full pipeline on 4×4 Ising — pilot → ladder → PT(A→B→C) → HDF5
+- [ ] Integration: Verify HDF5 layout matches spec (groups, resizable datasets, attrs)
+- [ ] Integration: Round-trip times are finite (replicas actually diffuse)
+- [ ] Integration: Kill-and-resume produces same snapshot count as uninterrupted run
 
 ## 2×2 Exact Partition Function (key validation tool)
 
