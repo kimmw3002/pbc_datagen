@@ -53,7 +53,7 @@ Each model's `sweep()` performs:
 | Model | Cluster Algorithm | Local Update |
 |---|---|---|
 | Ising | Wolff (spin-flip) | Metropolis with precomputed exp table |
-| Blume-Capel | Geometric (Heringa & Blöte point reflection) | Metropolis over {-1, 0, +1} |
+| Blume-Capel | Wolff (adapted for 3-state; vacancies block cluster growth) | Metropolis over {-1, 0, +1} |
 | Ashkin-Teller | Wiseman-Domany 3-step embedded Wolff (σ, τ, στ) | Metropolis for σ and τ independently |
 
 ## Python Layer
@@ -79,10 +79,10 @@ pbc_datagen/
 │   │   ├── prng.hpp            # Rng wrapper (uniform, rand_below, jump)
 │   │   ├── lattice.hpp         # Flat lattice + PBC neighbor table
 │   │   ├── ising.hpp           # IsingModel struct + SweepResult
-│   │   ├── blume_capel.hpp     # Blume-Capel header (stub)
+│   │   ├── blume_capel.hpp     # BlumeCapelModel struct + SweepResult
 │   │   └── ashkin_teller.hpp   # Ashkin-Teller header (stub)
 │   ├── ising.cpp               # Ising: Wolff, Metropolis, sweep
-│   ├── blume_capel.cpp         # Blume-Capel implementation (stub)
+│   ├── blume_capel.cpp         # Blume-Capel: Wolff, Metropolis, sweep
 │   ├── ashkin_teller.cpp       # Ashkin-Teller implementation (stub)
 │   └── bindings.cpp            # pybind11 _core module
 ├── python/pbc_datagen/
@@ -94,11 +94,17 @@ pbc_datagen/
 │   └── io.py                   # HDF5/numpy disk I/O (stub)
 ├── tests/
 │   ├── test_foundation.py      # PRNG + neighbor table tests
-│   └── ising/                  # Ising model tests (per-model folder)
-│       ├── test_model.py       # Construction, energy, magnetization
-│       ├── test_wolff.py       # Wolff cluster kernel + detailed balance
-│       ├── test_metropolis.py  # Metropolis sweep + detailed balance
-│       └── test_sweep.py       # Combined sweep + ergodicity
+│   ├── ising/                  # Ising model tests
+│   │   ├── test_model.py       # Construction, energy, magnetization
+│   │   ├── test_wolff.py       # Wolff cluster kernel + detailed balance
+│   │   ├── test_metropolis.py  # Metropolis sweep + detailed balance
+│   │   └── test_sweep.py       # Combined sweep + ergodicity
+│   └── blume_capel/            # Blume-Capel model tests
+│       ├── test_model.py       # Construction, energy, magnetization, quadrupole
+│       ├── test_wolff.py       # Wolff with vacancy barriers + detailed balance
+│       ├── test_metropolis.py  # Metropolis 3-state + 81-state chi-squared
+│       └── test_sweep.py       # Combined sweep + ergodicity (Welch's t-test)
 └── scripts/
+    ├── bench_ising.py          # Ising sweep benchmark (rich progress)
     └── generate_dataset.py     # Main entry point
 ```

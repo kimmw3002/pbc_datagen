@@ -1,5 +1,5 @@
 #pragma once
-// 2D Blume-Capel model — Geometric Cluster Algorithm + Metropolis hybrid.
+// 2D Blume-Capel model — Wolff cluster (adapted for 3-state) + Metropolis hybrid.
 //
 // H = -J Σ_{<ij>} s_i s_j  +  D Σ_i s_i²,   J = 1,   s_i ∈ {-1, 0, +1}.
 //
