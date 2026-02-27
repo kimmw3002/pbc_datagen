@@ -74,6 +74,24 @@ struct BlumeCapelModel {
     //
     // Returns the cluster size (0 if seed was vacant).
     int _wolff_step();
+
+    // Local energy change if spin[site] were changed to new_spin.
+    //
+    // ΔE = -(s_new - s_old) × Σ_neighbors s_j  +  D × (s_new² - s_old²)
+    //
+    // Unlike Ising (where the only move is s → -s), BC has 3 spin values
+    // so the energy change depends on WHICH new spin is proposed.
+    // Returns a double because D is continuous.
+    double _delta_energy(int site, int8_t new_spin) const;
+
+    // One Metropolis sweep: N random-site proposals.
+    //
+    // For each proposal: pick a random site, choose new_spin uniformly
+    // from {-1, 0, +1} \ {current} (symmetric proposal — no Hastings
+    // correction needed).  Accept if ΔE ≤ 0 or uniform() < exp(-ΔE/T).
+    //
+    // Returns the number of accepted proposals.
+    int _metropolis_sweep();
 };
 
 }  // namespace pbc

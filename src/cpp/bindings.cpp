@@ -105,5 +105,8 @@ PYBIND11_MODULE(_core, m) {
         .def("magnetization", &pbc::BlumeCapelModel::magnetization)
         .def("abs_magnetization", &pbc::BlumeCapelModel::abs_magnetization)
         .def("quadrupole", &pbc::BlumeCapelModel::quadrupole)
-        .def("_wolff_step", &pbc::BlumeCapelModel::_wolff_step);
+        .def("_wolff_step", &pbc::BlumeCapelModel::_wolff_step)
+        .def("_delta_energy", &pbc::BlumeCapelModel::_delta_energy,
+             py::arg("site"), py::arg("new_spin"))
+        .def("_metropolis_sweep", &pbc::BlumeCapelModel::_metropolis_sweep);
 }

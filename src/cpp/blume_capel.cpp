@@ -143,4 +143,51 @@ int BlumeCapelModel::_wolff_step() {
     return cluster_size;
 }
 
+double BlumeCapelModel::_delta_energy(int site, int8_t new_spin) const {
+    int8_t old_spin = spin[static_cast<size_t>(site)];
+
+    // Sum of neighbor spins
+    int neighbor_sum = 0;
+    for (int d = 0; d < 4; ++d) {
+        int j = nbr[static_cast<size_t>(site * 4 + d)];
+        neighbor_sum += spin[static_cast<size_t>(j)];
+    }
+
+    // ΔE = -(s_new - s_old) × Σ_neighbors  +  D × (s_new² - s_old²)
+    int ds = new_spin - old_spin;
+    int dsq = new_spin * new_spin - old_spin * old_spin;
+    return -ds * neighbor_sum + D_ * dsq;
+}
+
+int BlumeCapelModel::_metropolis_sweep() {
+    // Proposal lookup: for each current spin value, the two other options.
+    // Index by (old_spin + 1) to map {-1, 0, +1} → {0, 1, 2}.
+    static constexpr int8_t proposals[3][2] = {
+        { 1,  0},  // old_spin = -1: propose +1 or 0
+        { 1, -1},  // old_spin =  0: propose +1 or -1
+        {-1,  0},  // old_spin = +1: propose -1 or 0
+    };
+
+    int accepted = 0;
+
+    for (int step = 0; step < N; ++step) {
+        // Pick a random site
+        int site = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+        int8_t old_spin = spin[static_cast<size_t>(site)];
+
+        // Pick new spin uniformly from the 2 alternatives
+        int8_t new_spin = proposals[old_spin + 1][rng.rand_below(2)];
+
+        double dE = _delta_energy(site, new_spin);
+
+        // Accept if ΔE ≤ 0, otherwise with probability exp(-ΔE/T)
+        if (dE <= 0.0 || rng.uniform() < std::exp(-dE / T_)) {
+            spin[static_cast<size_t>(site)] = new_spin;
+            ++accepted;
+        }
+    }
+
+    return accepted;
+}
+
 }  // namespace pbc
