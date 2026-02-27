@@ -92,6 +92,19 @@ struct BlumeCapelModel {
     //
     // Returns the number of accepted proposals.
     int _metropolis_sweep();
+
+    // Result of sweep(): per-iteration observables.
+    struct SweepResult {
+        std::vector<double> energy;   // total energy (double because D is continuous)
+        std::vector<double> m;        // intensive magnetization
+        std::vector<double> abs_m;    // intensive |magnetization|
+        std::vector<double> q;        // quadrupole order parameter
+    };
+
+    // Combined update: n_sweeps iterations of (Metropolis sweep + Wolff step).
+    // After each iteration, records (E, m, |m|, Q) into the returned arrays.
+    // Requires set_temperature() to have been called (T_ > 0).
+    SweepResult sweep(int n_sweeps);
 };
 
 }  // namespace pbc

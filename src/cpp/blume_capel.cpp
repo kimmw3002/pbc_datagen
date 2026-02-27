@@ -190,4 +190,31 @@ int BlumeCapelModel::_metropolis_sweep() {
     return accepted;
 }
 
+BlumeCapelModel::SweepResult BlumeCapelModel::sweep(int n_sweeps) {
+    if (T_ <= 0.0) {
+        throw std::invalid_argument(
+            "Temperature not set — call set_temperature() before sweep()");
+    }
+
+    SweepResult result;
+    auto n = static_cast<size_t>(n_sweeps);
+    result.energy.resize(n);
+    result.m.resize(n);
+    result.abs_m.resize(n);
+    result.q.resize(n);
+
+    for (int i = 0; i < n_sweeps; ++i) {
+        _metropolis_sweep();
+        _wolff_step();
+
+        auto idx = static_cast<size_t>(i);
+        result.energy[idx] = energy();
+        result.m[idx]      = magnetization();
+        result.abs_m[idx]  = abs_magnetization();
+        result.q[idx]      = quadrupole();
+    }
+
+    return result;
+}
+
 }  // namespace pbc
