@@ -3,6 +3,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
+#include "ashkin_teller.hpp"
 #include "blume_capel.hpp"
 #include "ising.hpp"
 #include "lattice.hpp"
@@ -125,4 +126,45 @@ PYBIND11_MODULE(_core, m) {
             out["q"]      = std::move(q);
             return out;
         }, py::arg("n_sweeps"));
+
+    // --- Ashkin-Teller model -------------------------------------------------
+    py::class_<pbc::AshkinTellerModel>(m, "AshkinTellerModel")
+        .def(py::init<int, uint64_t>(), py::arg("L"), py::arg("seed"))
+        .def_readonly("L", &pbc::AshkinTellerModel::L)
+        .def_property_readonly("T", [](const pbc::AshkinTellerModel& self) {
+            return self.T_;
+        })
+        .def_property_readonly("U", [](const pbc::AshkinTellerModel& self) {
+            return self.U_;
+        })
+        .def_property_readonly("sigma", [](const pbc::AshkinTellerModel& self) {
+            return py::array_t<int8_t>(
+                {self.L, self.L},
+                {self.L * (int)sizeof(int8_t), (int)sizeof(int8_t)},
+                self.sigma.data(),
+                py::cast(self)
+            );
+        })
+        .def_property_readonly("tau", [](const pbc::AshkinTellerModel& self) {
+            return py::array_t<int8_t>(
+                {self.L, self.L},
+                {self.L * (int)sizeof(int8_t), (int)sizeof(int8_t)},
+                self.tau.data(),
+                py::cast(self)
+            );
+        })
+        .def("set_temperature", &pbc::AshkinTellerModel::set_temperature, py::arg("T"))
+        .def("set_four_spin_coupling", &pbc::AshkinTellerModel::set_four_spin_coupling,
+             py::arg("U"))
+        .def("set_sigma", &pbc::AshkinTellerModel::set_sigma,
+             py::arg("site"), py::arg("value"))
+        .def("set_tau", &pbc::AshkinTellerModel::set_tau,
+             py::arg("site"), py::arg("value"))
+        .def("energy", &pbc::AshkinTellerModel::energy)
+        .def("m_sigma", &pbc::AshkinTellerModel::m_sigma)
+        .def("abs_m_sigma", &pbc::AshkinTellerModel::abs_m_sigma)
+        .def("m_tau", &pbc::AshkinTellerModel::m_tau)
+        .def("abs_m_tau", &pbc::AshkinTellerModel::abs_m_tau)
+        .def("m_baxter", &pbc::AshkinTellerModel::m_baxter)
+        .def("abs_m_baxter", &pbc::AshkinTellerModel::abs_m_baxter);
 }

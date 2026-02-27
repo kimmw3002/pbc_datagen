@@ -18,10 +18,16 @@ from rich.table import Table
 
 # --- CLI ---
 parser = argparse.ArgumentParser(description="Blume-Capel demo with observable plots")
-parser.add_argument("--T", type=float, default=0.609, help="Temperature (default: 0.609, tricritical)")
-parser.add_argument("--D", type=float, default=1.966, help="Crystal field (default: 1.966, tricritical)")
+parser.add_argument(
+    "--T", type=float, default=0.609, help="Temperature (default: 0.609, tricritical)"
+)
+parser.add_argument(
+    "--D", type=float, default=1.966, help="Crystal field (default: 1.966, tricritical)"
+)
 parser.add_argument("--L", type=int, default=64, help="Lattice side length (default: 64)")
-parser.add_argument("--sweeps", type=int, default=1_000_000, help="Number of sweeps (default: 1000000)")
+parser.add_argument(
+    "--sweeps", type=int, default=1_000_000, help="Number of sweeps (default: 1000000)"
+)
 parser.add_argument("--seed", type=int, default=42, help="RNG seed (default: 42)")
 args = parser.parse_args()
 
