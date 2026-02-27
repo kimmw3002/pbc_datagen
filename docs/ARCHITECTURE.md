@@ -54,7 +54,7 @@ Each model's `sweep()` performs:
 |---|---|---|
 | Ising | Wolff (spin-flip) | Metropolis with precomputed exp table |
 | Blume-Capel | Wolff (adapted for 3-state; vacancies block cluster growth) | Metropolis over {-1, 0, +1} |
-| Ashkin-Teller | Wiseman-Domany 3-step embedded Wolff (σ, τ, στ) | Metropolis for σ and τ independently |
+| Ashkin-Teller | Embedded Wolff (Wiseman-Domany 1995): pick σ or τ, J_eff = J + U·fixed; auto-remap to (σ, s=στ) basis when U > 1 | Metropolis for σ and τ independently (2N proposals) |
 
 ## Python Layer
 
