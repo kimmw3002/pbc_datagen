@@ -17,39 +17,14 @@
 
 Tests: `tests/ising/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. All include 2×2 exact partition function chi-squared checks for detailed balance.
 
-### 1.2 Blume-Capel Model
-- [x] Step 1.2.1: `blume_capel.hpp` + `blume_capel.cpp` — BlumeCapelModel struct, constructor, set_temperature, set_crystal_field, energy, magnetization, abs_magnetization, quadrupole, set_spin
-- [x] Step 1.2.2: `_wolff_step()` — Wolff single-cluster flip (spin-0 sites are "dead" barriers)
-- [x] Step 1.2.3: `_metropolis_sweep()` — N random-site proposals over {-1, 0, +1} with crystal field D
-- [x] Step 1.2.4: `sweep()` = Wolff + Metropolis, observable tracking (E, M, |M|, Q)
+### 1.2 Blume-Capel Model ✅
 
-#### BC Wolff Design Notes
+- [x] Step 1.2.1: `blume_capel.hpp` + `blume_capel.cpp` — struct, constructor, observables (E, m, |m|, Q)
+- [x] Step 1.2.2: `_wolff_step()` — Wolff cluster flip; vacancies block growth, D doesn't affect bonds
+- [x] Step 1.2.3: `_metropolis_sweep()` — symmetric proposal over {-1,0,+1}\\{current}, `_delta_energy(site, new_spin)` used by sweep
+- [x] Step 1.2.4: `sweep()` — Metropolis + Wolff, returns dict with keys `energy`, `m`, `abs_m`, `q`
 
-Standard Wolff cluster algorithm, adapted for 3-state spins:
-- If `spin[seed] == 0` → return immediately (cluster_size = 0). Vacancies can't seed clusters.
-- DFS grows through neighbors with `spin[j] == seed_spin` (±1). Spin-0 sites naturally fail this
-  check and act as barriers that fragment the lattice.
-- Bond probability: `p_add = 1 - exp(-2/T)` — identical to Ising.
-  The crystal field D does NOT affect Wolff bond probabilities because (-s)² = s²; the D·s² term
-  cancels exactly under cluster flip.
-- Cluster flip: s → -s for all cluster members. Vacancies are never touched.
-- Wolff alone is NOT ergodic for BC — it cannot create/destroy vacancies. Metropolis handles 0 ↔ ±1 transitions.
-
-#### BC Metropolis Design Notes
-
-- Proposal: pick random site, propose `new_spin` uniformly from `{-1, 0, +1} \ {current}` (symmetric, no Hastings correction needed).
-- `ΔE = -(s_new - s_old) × Σ_neighbors s_j  +  D × (s_new² - s_old²)`
-- Accept if ΔE ≤ 0 or `uniform() < exp(-ΔE/T)`.
-- Possible transitions and their crystal field part D·(s_new² - s_old²):
-  - ±1 → ∓1: crystal part = 0 (magnetic flip, no vacancy change)
-  - ±1 → 0:  crystal part = -D (creating a vacancy)
-  -  0 → ±1: crystal part = +D (filling a vacancy)
-
-#### 2×2 BC Exact Partition Function
-
-3⁴ = 81 states. Enumerate all in Python for chi-squared tests.
-H = -Σ_{⟨ij⟩} s_i s_j + D Σ_i s_i² over 4 nearest-neighbor bonds (PBC).
-Tests at multiple (T, D) pairs validate detailed balance for both Wolff and Metropolis.
+Tests: `tests/blume_capel/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. All include 2×2 exact partition function (81 states) chi-squared checks. Ergodicity verified via Welch's t-test (all-magnetic vs all-vacancy starts).
 
 ### 1.3 Ashkin-Teller Model
 - [ ] Step 1.3.1: `ashkin_teller.hpp` + `ashkin_teller.cpp` — AshkinTellerModel struct
