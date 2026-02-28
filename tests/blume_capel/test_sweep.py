@@ -23,37 +23,8 @@ the tests before the C++ binding exists.
 
 from __future__ import annotations
 
-import itertools
-import math
-
 import numpy as np
 import pytest
-
-# ---------------------------------------------------------------------------
-# Helper: 2×2 exact partition function for BC (81 states)
-# ---------------------------------------------------------------------------
-
-
-def _bc_2x2_exact_distribution(T: float, D: float) -> dict[float, float]:
-    """Enumerate all 3⁴ = 81 states and return exact P(E) at given (T, D).
-
-    On the 2×2 PBC lattice:
-    H = -2(s0·s1 + s0·s2 + s1·s3 + s2·s3)  +  D(s0² + s1² + s2² + s3²)
-    """
-    energy_weight: dict[float, float] = {}
-
-    for s0, s1, s2, s3 in itertools.product([-1, 0, 1], repeat=4):
-        coupling = -2 * (s0 * s1 + s0 * s2 + s1 * s3 + s2 * s3)
-        crystal = D * (s0**2 + s1**2 + s2**2 + s3**2)
-        e = coupling + crystal
-        e_key = round(e, 10)
-
-        w = math.exp(-e / T)
-        energy_weight[e_key] = energy_weight.get(e_key, 0.0) + w
-
-    Z = sum(energy_weight.values())
-    return {e: w / Z for e, w in energy_weight.items()}
-
 
 # ---------------------------------------------------------------------------
 # API contract
@@ -161,7 +132,9 @@ def test_sweep_detailed_balance_2x2(T: float, D: float) -> None:
     from pbc_datagen._core import BlumeCapelModel
     from scipy.stats import chisquare
 
-    exact_dist = _bc_2x2_exact_distribution(T, D)
+    from tests.exact_2x2 import bc_exact_probabilities
+
+    exact_dist = bc_exact_probabilities(T, D)
 
     model = BlumeCapelModel(L=2, seed=42)
     model.set_temperature(T)
@@ -178,7 +151,7 @@ def test_sweep_detailed_balance_2x2(T: float, D: float) -> None:
     # Histogram the sampled energies
     energy_counts: dict[float, int] = {}
     for e in energies:
-        e_key = round(float(e), 10)
+        e_key = round(float(e), 8)
         energy_counts[e_key] = energy_counts.get(e_key, 0) + 1
 
     # Build observed/expected arrays, sorted by energy

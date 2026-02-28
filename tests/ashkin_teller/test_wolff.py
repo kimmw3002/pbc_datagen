@@ -28,61 +28,8 @@ the tests even before the C++ binding is updated.
 
 from __future__ import annotations
 
-import itertools
-import math
-
 import numpy as np
-import numpy.typing as npt
 import pytest
-
-# ---------------------------------------------------------------------------
-# Helper: 2×2 exact partition function for the Ashkin-Teller model
-# ---------------------------------------------------------------------------
-
-
-def _at_exact_energy_2x2(
-    sigma: list[int], tau: list[int], U: float, nbr: npt.NDArray[np.int32]
-) -> float:
-    """Compute AT energy on 2×2 PBC lattice, same convention as C++.
-
-    C++ sums over all N×4 directed neighbor pairs, then divides by 2.
-    Reuses the same make_neighbor_table() that the C++ model uses.
-    """
-    sigma_sum = 0
-    tau_sum = 0
-    four_spin_sum = 0
-    for i in range(4):
-        for d in range(4):
-            j = int(nbr[i, d])
-            sigma_sum += sigma[i] * sigma[j]
-            tau_sum += tau[i] * tau[j]
-            four_spin_sum += sigma[i] * sigma[j] * tau[i] * tau[j]
-    return -sigma_sum / 2.0 - tau_sum / 2.0 - U * four_spin_sum / 2.0
-
-
-def _at_exact_probabilities_2x2(T: float, U: float) -> dict[float, float]:
-    """Enumerate all 2^8 = 256 states on 2×2 AT lattice.
-
-    Returns {energy_level: probability} at temperature T.
-    """
-    from pbc_datagen._core import make_neighbor_table
-
-    nbr = make_neighbor_table(2)
-    beta = 1.0 / T
-    # Accumulate Boltzmann weights by energy level
-    energy_weights: dict[float, float] = {}
-
-    all_configs = list(itertools.product([-1, 1], repeat=4))  # 16 Ising configs
-    for sigma in all_configs:
-        for tau in all_configs:
-            E = _at_exact_energy_2x2(list(sigma), list(tau), U, nbr)
-            E_round = round(E, 8)  # avoid float noise
-            weight = math.exp(-beta * E_round)
-            energy_weights[E_round] = energy_weights.get(E_round, 0.0) + weight
-
-    Z = sum(energy_weights.values())
-    return {E: w / Z for E, w in energy_weights.items()}
-
 
 # ---------------------------------------------------------------------------
 # 1. Basic correctness
@@ -337,7 +284,9 @@ def test_wolff_detailed_balance_2x2(T: float, U: float) -> None:
     from pbc_datagen._core import AshkinTellerModel
     from scipy.stats import chisquare
 
-    exact_probs = _at_exact_probabilities_2x2(T, U)
+    from tests.exact_2x2 import at_exact_probabilities
+
+    exact_probs = at_exact_probabilities(T, U)
     energy_levels = sorted(exact_probs.keys())
 
     model = AshkinTellerModel(2, seed=42)

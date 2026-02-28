@@ -115,7 +115,7 @@ Accept with probability min(1, exp(-ΔE / T)).
 
 - [x] Step 1.3.1: `ashkin_teller.hpp` + `ashkin_teller.cpp` — AshkinTellerModel struct, constructor, `set_temperature`, `set_four_spin_coupling` (auto-remapping, U ≥ 0), energy, magnetizations (σ, τ, Baxter), `set_sigma`/`set_tau`
 - [x] Step 1.3.2: `_wolff_step()` — Embedded Wolff: pick σ or τ (or σ/s when remapped), compute J_eff per bond, grow cluster, flip with physical-basis translation
-- [ ] Step 1.3.3: `_metropolis_sweep()` — 2N proposals (N for σ, N for τ), ΔE formulas above
+- [x] Step 1.3.3: `_metropolis_sweep()` — 2N proposals (N for σ, N for τ), ΔE formulas above
 - [ ] Step 1.3.4: `sweep()` — Metropolis + embedded Wolff, returns dict with 7 observable arrays
 
 Tests: `tests/ashkin_teller/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. 2×2 exact partition function (256 states) chi-squared checks. Verify remapping produces consistent observables for U > 1.

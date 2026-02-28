@@ -127,6 +127,78 @@ double AshkinTellerModel::abs_m_baxter() const {
     return std::abs(static_cast<double>(sum)) / N;
 }
 
+double AshkinTellerModel::_delta_energy_sigma(int site) const {
+    // ΔE for flipping σ_i → -σ_i, holding τ fixed.
+    //
+    // ΔE = 2σ_i Σ_{j∈nbr(i)} σ_j (1 + U τ_i τ_j)
+    //
+    // Derivation: the terms involving σ_i in H are:
+    //   -σ_i Σ_j σ_j  (two-spin coupling)
+    //   -U σ_i Σ_j σ_j τ_i τ_j  (four-spin coupling)
+    // Flipping σ_i → -σ_i changes each of these by 2× its value.
+    auto si = static_cast<size_t>(site);
+    int8_t sigma_i = sigma[si];
+    int8_t tau_i   = tau[si];
+
+    double sum = 0.0;
+    for (int d = 0; d < 4; ++d) {
+        auto j = static_cast<size_t>(nbr[static_cast<size_t>(site * 4 + d)]);
+        // Each neighbor contributes σ_j × (1 + U τ_i τ_j)
+        sum += sigma[j] * (1.0 + U_ * tau_i * tau[j]);
+    }
+
+    return 2.0 * sigma_i * sum;
+}
+
+double AshkinTellerModel::_delta_energy_tau(int site) const {
+    // ΔE for flipping τ_i → -τ_i, holding σ fixed.
+    //
+    // ΔE = 2τ_i Σ_{j∈nbr(i)} τ_j (1 + U σ_i σ_j)
+    //
+    // Identical structure to _delta_energy_sigma, with σ ↔ τ swapped.
+    auto si = static_cast<size_t>(site);
+    int8_t tau_i   = tau[si];
+    int8_t sigma_i = sigma[si];
+
+    double sum = 0.0;
+    for (int d = 0; d < 4; ++d) {
+        auto j = static_cast<size_t>(nbr[static_cast<size_t>(site * 4 + d)]);
+        sum += tau[j] * (1.0 + U_ * sigma_i * sigma[j]);
+    }
+
+    return 2.0 * tau_i * sum;
+}
+
+int AshkinTellerModel::_metropolis_sweep() {
+    // 2N proposals: N for σ flips, then N for τ flips.
+    // Operates in the physical (σ, τ) basis regardless of U.
+    int accepted = 0;
+
+    // --- N σ-flip proposals ---
+    for (int step = 0; step < N; ++step) {
+        int site = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+        double dE = _delta_energy_sigma(site);
+        if (dE <= 0.0 || rng.uniform() < std::exp(-dE / T_)) {
+            sigma[static_cast<size_t>(site)] =
+                static_cast<int8_t>(-sigma[static_cast<size_t>(site)]);
+            ++accepted;
+        }
+    }
+
+    // --- N τ-flip proposals ---
+    for (int step = 0; step < N; ++step) {
+        int site = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+        double dE = _delta_energy_tau(site);
+        if (dE <= 0.0 || rng.uniform() < std::exp(-dE / T_)) {
+            tau[static_cast<size_t>(site)] =
+                static_cast<int8_t>(-tau[static_cast<size_t>(site)]);
+            ++accepted;
+        }
+    }
+
+    return accepted;
+}
+
 int AshkinTellerModel::_wolff_step() {
     // --- 1. Pick a channel (0 or 1) at random (50/50) ---
     int channel = (rng.uniform() < 0.5) ? 0 : 1;

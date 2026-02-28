@@ -72,6 +72,28 @@ struct AshkinTellerModel {
     // Absolute Baxter order parameter:  |m_B| = (1/N) |Σ σ_i τ_i|.
     double abs_m_baxter() const;
 
+    // Local energy change for flipping σ_i → -σ_i (τ held fixed).
+    //
+    // ΔE = 2σ_i Σ_{j∈nbr(i)} σ_j (1 + U τ_i τ_j)
+    //
+    // Operates in the physical basis at all U values — no remapping.
+    double _delta_energy_sigma(int site) const;
+
+    // Local energy change for flipping τ_i → -τ_i (σ held fixed).
+    //
+    // ΔE = 2τ_i Σ_{j∈nbr(i)} τ_j (1 + U σ_i σ_j)
+    //
+    // Operates in the physical basis at all U values — no remapping.
+    double _delta_energy_tau(int site) const;
+
+    // One Metropolis sweep: 2N proposals (N for σ flips, N for τ flips).
+    //
+    // For each proposal: pick a random site, compute ΔE for the flip,
+    // accept if ΔE ≤ 0 or uniform() < exp(-ΔE/T).
+    //
+    // Returns the total number of accepted proposals (out of 2N).
+    int _metropolis_sweep();
+
     // Embedded Wolff single-cluster update (Wiseman & Domany, 1995).
     //
     // Projects the two-layer model onto a single Ising-like variable:

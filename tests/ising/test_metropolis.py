@@ -12,8 +12,6 @@ All imports are lazy so pytest can collect before the C++ binding exists.
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
 
@@ -161,12 +159,9 @@ def test_metropolis_detailed_balance_2x2(T: float) -> None:
     from pbc_datagen._core import IsingModel
     from scipy.stats import chisquare
 
-    Z = 2 * math.exp(8 / T) + 12 + 2 * math.exp(-8 / T)
-    exact_probs = {
-        -8: 2 * math.exp(8 / T) / Z,
-        0: 12 / Z,
-        8: 2 * math.exp(-8 / T) / Z,
-    }
+    from tests.exact_2x2 import ising_exact_probabilities
+
+    exact_probs = ising_exact_probabilities(T)
 
     model = IsingModel(L=2, seed=42)
     model.set_temperature(T)

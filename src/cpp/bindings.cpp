@@ -167,5 +167,10 @@ PYBIND11_MODULE(_core, m) {
         .def("abs_m_tau", &pbc::AshkinTellerModel::abs_m_tau)
         .def("m_baxter", &pbc::AshkinTellerModel::m_baxter)
         .def("abs_m_baxter", &pbc::AshkinTellerModel::abs_m_baxter)
+        .def("_delta_energy_sigma", &pbc::AshkinTellerModel::_delta_energy_sigma,
+             py::arg("site"))
+        .def("_delta_energy_tau", &pbc::AshkinTellerModel::_delta_energy_tau,
+             py::arg("site"))
+        .def("_metropolis_sweep", &pbc::AshkinTellerModel::_metropolis_sweep)
         .def("_wolff_step", &pbc::AshkinTellerModel::_wolff_step);
 }
