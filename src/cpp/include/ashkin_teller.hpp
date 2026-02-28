@@ -71,6 +71,19 @@ struct AshkinTellerModel {
 
     // Absolute Baxter order parameter:  |m_B| = (1/N) |Σ σ_i τ_i|.
     double abs_m_baxter() const;
+
+    // Embedded Wolff single-cluster update (Wiseman & Domany, 1995).
+    //
+    // Projects the two-layer model onto a single Ising-like variable:
+    //   U ≤ 1: cluster on σ or τ (50/50), hold the other fixed.
+    //   U > 1: remap to (σ, s=στ) basis; cluster on σ or s (50/50).
+    //
+    // Bond coupling is per-neighbor-pair:
+    //   J_eff(j,k) = J_base + U_eff × fixed_j × fixed_k
+    // where J_base and U_eff depend on the chosen channel and remapping.
+    //
+    // Returns the cluster size (always ≥ 1).
+    int _wolff_step();
 };
 
 }  // namespace pbc

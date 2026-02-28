@@ -127,4 +127,135 @@ double AshkinTellerModel::abs_m_baxter() const {
     return std::abs(static_cast<double>(sum)) / N;
 }
 
+int AshkinTellerModel::_wolff_step() {
+    // --- 1. Pick a channel (0 or 1) at random (50/50) ---
+    int channel = (rng.uniform() < 0.5) ? 0 : 1;
+
+    // --- 2. Determine clustering mode and coupling constants ---
+    //
+    // mode encodes which variable pair we cluster on:
+    //   0: cluster σ, hold τ fixed       (U ≤ 1)  → flip σ only
+    //   1: cluster τ, hold σ fixed       (U ≤ 1)  → flip τ only
+    //   2: cluster σ, hold s=στ fixed    (U > 1)  → flip both σ and τ
+    //   3: cluster s=στ, hold σ fixed    (U > 1)  → flip τ only
+    //
+    // Instead of copying N spins into target[] and fixed[] arrays,
+    // we compute them on-the-fly from sigma[] and tau[] using lambdas.
+    // The 'mode' variable is loop-invariant, so the branch predictor
+    // handles the switch at zero cost.
+
+    int mode;
+    double J_base, U_eff;
+
+    if (!remapped_) {
+        J_base = 1.0;
+        U_eff  = U_;
+        mode   = channel;  // 0 or 1
+    } else if (channel == 0) {
+        // Cluster on σ, hold s fixed.  Flipping σ with s held → both flip.
+        J_base = 1.0;
+        U_eff  = 1.0;
+        mode   = 2;
+    } else {
+        // Cluster on s, hold σ fixed.  Flipping s with σ held → only τ flips.
+        J_base = U_;
+        U_eff  = 1.0;
+        mode   = 3;
+    }
+
+    // Compute the target spin (variable we cluster on) at site idx.
+    // A lambda is a small unnamed function defined inline:
+    //   [&] captures all local variables by reference (sigma, tau, mode).
+    //   (size_t idx) is the parameter.
+    //   -> int8_t is the return type.
+    auto target_at = [&](size_t idx) -> int8_t {
+        switch (mode) {
+            case 0:  return sigma[idx];                                    // σ
+            case 1:  return tau[idx];                                      // τ
+            case 2:  return sigma[idx];                                    // σ
+            case 3:  return static_cast<int8_t>(sigma[idx] * tau[idx]);    // s = στ
+            default: return 0;  // unreachable
+        }
+    };
+
+    // Compute the fixed spin (variable held constant) at site idx.
+    auto fixed_at = [&](size_t idx) -> int8_t {
+        switch (mode) {
+            case 0:  return tau[idx];                                      // τ
+            case 1:  return sigma[idx];                                    // σ
+            case 2:  return static_cast<int8_t>(sigma[idx] * tau[idx]);    // s = στ
+            case 3:  return sigma[idx];                                    // σ
+            default: return 0;  // unreachable
+        }
+    };
+
+    // --- 3. Precompute the two possible bond probabilities ---
+    //
+    // When the fixed-layer spins at j and k are aligned:
+    //   J_eff = J_base + U_eff  →  p_aligned = 1 - exp(-2(J_base + U_eff)/T)
+    // When anti-aligned:
+    //   J_eff = J_base - U_eff  →  p_anti    = 1 - exp(-2(J_base - U_eff)/T)
+
+    double p_aligned = 1.0 - std::exp(-2.0 * (J_base + U_eff) / T_);
+    double p_anti    = 1.0 - std::exp(-2.0 * (J_base - U_eff) / T_);
+
+    // --- 4. Pick a random seed site ---
+    int seed = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+    int8_t seed_target = target_at(static_cast<size_t>(seed));
+
+    // --- 5. Grow the cluster via DFS ---
+    std::vector<bool> in_cluster(static_cast<size_t>(N), false);
+    std::vector<int> stack;
+    stack.push_back(seed);
+    in_cluster[static_cast<size_t>(seed)] = true;
+    int cluster_size = 0;
+
+    while (!stack.empty()) {
+        int site = stack.back();
+        stack.pop_back();
+        ++cluster_size;
+
+        auto sdx = static_cast<size_t>(site);
+        int8_t f_site = fixed_at(sdx);
+
+        for (int d = 0; d < 4; ++d) {
+            int j = nbr[static_cast<size_t>(site * 4 + d)];
+            auto jdx = static_cast<size_t>(j);
+            if (in_cluster[jdx]) continue;
+
+            // Only aligned target-variable neighbors can join
+            if (target_at(jdx) != seed_target) continue;
+
+            // Bond probability depends on fixed-layer alignment
+            double p_add = (f_site * fixed_at(jdx) > 0)
+                               ? p_aligned
+                               : p_anti;
+
+            if (rng.uniform() < p_add) {
+                in_cluster[jdx] = true;
+                stack.push_back(j);
+            }
+        }
+    }
+
+    // --- 6. Flip the cluster ---
+    for (int i = 0; i < N; ++i) {
+        if (!in_cluster[static_cast<size_t>(i)]) continue;
+        auto idx = static_cast<size_t>(i);
+        if (mode == 0) {
+            // σ-clustering (non-remapped): flip σ only
+            sigma[idx] = static_cast<int8_t>(-sigma[idx]);
+        } else if (mode == 2) {
+            // σ-clustering (remapped): flip both σ and τ
+            sigma[idx] = static_cast<int8_t>(-sigma[idx]);
+            tau[idx]   = static_cast<int8_t>(-tau[idx]);
+        } else {
+            // mode 1 (τ-clustering) or mode 3 (s-clustering): flip τ only
+            tau[idx] = static_cast<int8_t>(-tau[idx]);
+        }
+    }
+
+    return cluster_size;
+}
+
 }  // namespace pbc
