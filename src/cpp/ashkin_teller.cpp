@@ -330,4 +330,37 @@ int AshkinTellerModel::_wolff_step() {
     return cluster_size;
 }
 
+AshkinTellerModel::SweepResult AshkinTellerModel::sweep(int n_sweeps) {
+    if (T_ <= 0.0) {
+        throw std::invalid_argument(
+            "Temperature not set — call set_temperature() before sweep()");
+    }
+
+    SweepResult result;
+    auto n = static_cast<size_t>(n_sweeps);
+    result.energy.resize(n);
+    result.m_sigma.resize(n);
+    result.abs_m_sigma.resize(n);
+    result.m_tau.resize(n);
+    result.abs_m_tau.resize(n);
+    result.m_baxter.resize(n);
+    result.abs_m_baxter.resize(n);
+
+    for (int i = 0; i < n_sweeps; ++i) {
+        _metropolis_sweep();
+        _wolff_step();
+
+        auto idx = static_cast<size_t>(i);
+        result.energy[idx]       = energy();
+        result.m_sigma[idx]      = m_sigma();
+        result.abs_m_sigma[idx]  = abs_m_sigma();
+        result.m_tau[idx]        = m_tau();
+        result.abs_m_tau[idx]    = abs_m_tau();
+        result.m_baxter[idx]     = m_baxter();
+        result.abs_m_baxter[idx] = abs_m_baxter();
+    }
+
+    return result;
+}
+
 }  // namespace pbc

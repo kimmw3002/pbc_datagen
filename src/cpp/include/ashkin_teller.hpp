@@ -106,6 +106,22 @@ struct AshkinTellerModel {
     //
     // Returns the cluster size (always ≥ 1).
     int _wolff_step();
+
+    // Result of sweep(): per-iteration observables (all 7 AT observables).
+    struct SweepResult {
+        std::vector<double> energy;
+        std::vector<double> m_sigma;
+        std::vector<double> abs_m_sigma;
+        std::vector<double> m_tau;
+        std::vector<double> abs_m_tau;
+        std::vector<double> m_baxter;
+        std::vector<double> abs_m_baxter;
+    };
+
+    // Combined update: n_sweeps iterations of (Metropolis sweep + Wolff step).
+    // After each iteration, records all 7 observables into the returned arrays.
+    // Requires set_temperature() to have been called (T_ > 0).
+    SweepResult sweep(int n_sweeps);
 };
 
 }  // namespace pbc

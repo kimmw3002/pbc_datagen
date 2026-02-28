@@ -1,6 +1,6 @@
 # Implementation Plan — pbc_datagen
 
-## Phase 1: C++ Backend & Hybrid Update Kernels
+## Phase 1: C++ Backend & Hybrid Update Kernels ✅
 
 ### 1.0 Foundation ✅
 
@@ -26,102 +26,22 @@ Tests: `tests/ising/` — test_model.py, test_wolff.py, test_metropolis.py, test
 
 Tests: `tests/blume_capel/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. All include 2×2 exact partition function (81 states) chi-squared checks. Ergodicity verified via Welch's t-test (all-magnetic vs all-vacancy starts).
 
-### 1.3 Ashkin-Teller Model
+### 1.3 Ashkin-Teller Model ✅
 
-**Hamiltonian:**
-```
-H = -J Σ_{<ij>} σ_i σ_j  -  J Σ_{<ij>} τ_i τ_j  -  U Σ_{<ij>} σ_i σ_j τ_i τ_j
-```
-where J = 1 (fixed ferromagnetic unit), U is the four-spin coupling, and σ_i, τ_i ∈ {-1, +1}.
+`src/cpp/ashkin_teller.hpp` + `ashkin_teller.cpp` — Two coupled Ising layers with four-spin coupling U.
+Embedded Wolff cluster (Wiseman & Domany, 1995) with automatic σ,τ → σ,s=στ remapping when U > 1.
+Metropolis sweep in physical (σ,τ) basis. 7 observables: energy, m_σ, |m_σ|, m_τ, |m_τ|, m_B, |m_B|.
 
-Public API: `set_four_spin(U)` sets U. J = 1 is fixed and not user-settable.
-For the Z(4) subspace, both two-spin couplings are equal (J_σ = J_τ = 1);
-anisotropy arises only internally when the remapping (below) is needed.
+- [x] Step 1.3.1: Struct, constructor, observables, `set_four_spin_coupling` (auto-remapping)
+- [x] Step 1.3.2: `_wolff_step()` — Embedded Wolff with 4 modes (σ/τ non-remapped, σ/s remapped)
+- [x] Step 1.3.3: `_metropolis_sweep()` — 2N proposals (N for σ, N for τ)
+- [x] Step 1.3.4: `sweep()` — Metropolis + embedded Wolff, returns dict with 7 observable arrays
 
-#### Cluster Algorithm — Embedded Wolff (Wiseman & Domany, 1995)
+Tests: `tests/ashkin_teller/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. 2×2 exact partition function (256 states) chi-squared checks. σ-τ symmetry verified under remapping.
 
-**Case 1: U ≤ 1 (no remapping)**
+### 1.4 pybind11 Bindings ✅
 
-1. Randomly pick target variable: σ or τ (50/50).
-2. Hold the other variable fixed. This gives an effective Ising model where
-   the bond coupling between sites j, k is:
-   `J_eff(j,k) = J + U · (fixed_j)(fixed_k)`
-3. Pick a random seed site. Grow Wolff cluster: for each neighbor k of a
-   cluster site j with aligned target spin, add to cluster with probability
-   `1 - exp(-2 · J_eff(j,k) / T)`.
-4. Flip all target spins in the cluster. The fixed variable is unchanged.
-
-**Case 2: U > 1 (remapping required)**
-
-When U > 1, the effective coupling J_eff = J - U < 0 for anti-aligned fixed
-spins, making the bond probability invalid (> 1). Fix by introducing
-s_j = σ_j τ_j and working in (σ, s) basis:
-
-| Physical coupling | Value | Working coupling | Value |
-|---|---|---|---|
-| J_σ | 1 | J_σ | 1 |
-| J_τ | 1 | J_s | U |
-| U   | U | U'  | 1 |
-
-Since U' = 1 ≤ min(J_σ, J_s), bond probabilities are valid. The cluster
-algorithm is the same as Case 1 but operating on (σ, s) instead of (σ, τ):
-
-1. Randomly pick target variable: σ or s (50/50).
-2. Hold the other variable fixed.
-   - If clustering σ (holding s fixed): `J_eff(j,k) = 1 + 1 · s_j s_k`
-   - If clustering s (holding σ fixed): `J_eff(j,k) = U + 1 · σ_j σ_k`
-3. Grow Wolff cluster (alignment checked on the target variable; for s,
-   check `σ_j τ_j == σ_seed τ_seed`).
-4. Flip target variable in cluster.
-
-Translation back to physical (σ, τ) after flipping:
-- Flipping σ with s held fixed → both σ AND τ flip (since τ = s·σ)
-- Flipping s with σ held fixed → only τ flips (since τ = s·σ and s changed)
-
-**Internal representation:** The struct always stores physical σ and τ arrays.
-Computes s = σ·τ on the fly when remapping is active. The `remapped_` flag is
-set automatically by `set_four_spin(U)`. Anisotropic internal couplings
-(J_a, J_b, U_eff) support both cases without branching in the cluster loop.
-
-#### Metropolis Sweep
-
-Operates in physical (σ, τ) basis regardless of remapping. For each of 2N
-random proposals (N for σ, N for τ):
-
-ΔE for σ_i → -σ_i:
-```
-ΔE = 2σ_i Σ_{j∈nbr(i)} σ_j (J + U τ_i τ_j)
-```
-ΔE for τ_i → -τ_i:
-```
-ΔE = 2τ_i Σ_{j∈nbr(i)} τ_j (J + U σ_i σ_j)
-```
-
-Accept with probability min(1, exp(-ΔE / T)).
-
-#### Observables
-
-| Key | Definition |
-|-----|-----------|
-| `energy` | Full Hamiltonian |
-| `m_sigma` | (1/N) Σ σ_i |
-| `abs_m_sigma` | (1/N) \|Σ σ_i\| |
-| `m_tau` | (1/N) Σ τ_i |
-| `abs_m_tau` | (1/N) \|Σ τ_i\| |
-| `m_baxter` | (1/N) Σ σ_i τ_i  (Baxter order parameter) |
-| `abs_m_baxter` | (1/N) \|Σ σ_i τ_i\| |
-
-#### Steps
-
-- [x] Step 1.3.1: `ashkin_teller.hpp` + `ashkin_teller.cpp` — AshkinTellerModel struct, constructor, `set_temperature`, `set_four_spin_coupling` (auto-remapping, U ≥ 0), energy, magnetizations (σ, τ, Baxter), `set_sigma`/`set_tau`
-- [x] Step 1.3.2: `_wolff_step()` — Embedded Wolff: pick σ or τ (or σ/s when remapped), compute J_eff per bond, grow cluster, flip with physical-basis translation
-- [x] Step 1.3.3: `_metropolis_sweep()` — 2N proposals (N for σ, N for τ), ΔE formulas above
-- [ ] Step 1.3.4: `sweep()` — Metropolis + embedded Wolff, returns dict with 7 observable arrays
-
-Tests: `tests/ashkin_teller/` — test_model.py, test_wolff.py, test_metropolis.py, test_sweep.py. 2×2 exact partition function (256 states) chi-squared checks. Verify remapping produces consistent observables for U > 1.
-
-### 1.4 pybind11 Bindings
-- [ ] Step 1.4.1: `bindings.cpp` — expose all three models, sweep(), observables, lattice data
+`src/cpp/bindings.cpp` — All three models fully bound: constructors, properties (L, T, spins/sigma/tau), observables, internal update methods, and `sweep()` returning numpy dict. Type stubs in `_core.pyi`.
 
 ## Model Interface (contract between C++ models and Python orchestration)
 
@@ -642,7 +562,7 @@ File: `scripts/generate_dataset.py`
 
 ## Test Plan
 
-### Phase 1 Tests (completed)
+### Phase 1 Tests (completed) ✅
 
 - [x] Unit: PRNG smoke test (determinism, range, uniformity, autocorrelation) — `tests/test_foundation.py`
 - [x] Unit: Neighbor table correctness for various L (shape, PBC, symmetry) — `tests/test_foundation.py`
@@ -655,12 +575,12 @@ File: `scripts/generate_dataset.py`
 - [x] Unit: BC sweep — detailed balance + ergodicity, observables dict includes Q — `tests/blume_capel/test_sweep.py`
 ### Phase 1 Tests — Ashkin-Teller (`tests/ashkin_teller/`)
 
-- [ ] Unit: AT construction, cold-start energy, σ/τ/Baxter magnetizations — `test_model.py`
-- [ ] Unit: AT Wolff — effective coupling J_eff = J + U·fixed, cluster growth, flip correctness — `test_wolff.py`
-- [ ] Unit: AT Wolff remapping — U > 1 activates s = στ basis, bond probabilities stay in [0,1] — `test_wolff.py`
-- [ ] Unit: AT Metropolis — ΔE formulas, 2×2 detailed balance (256 states, chi-squared) — `test_metropolis.py`
-- [ ] Unit: AT sweep — detailed balance + ergodicity, observables dict has 7 keys — `test_sweep.py`
-- [ ] Unit: AT sweep with U > 1 — remapped cluster produces correct equilibrium statistics — `test_sweep.py`
+- [x] Unit: AT construction, cold-start energy, σ/τ/Baxter magnetizations — `test_model.py`
+- [x] Unit: AT Wolff — effective coupling J_eff = J + U·fixed, cluster growth, flip correctness — `test_wolff.py`
+- [x] Unit: AT Wolff remapping — U > 1 activates s = στ basis, bond probabilities stay in [0,1] — `test_wolff.py`
+- [x] Unit: AT Metropolis — ΔE formulas, 2×2 detailed balance (256 states, chi-squared) — `test_metropolis.py`
+- [x] Unit: AT sweep — detailed balance + ergodicity, observables dict has 7 keys — `test_sweep.py`
+- [x] Unit: AT sweep with U > 1 — remapped cluster produces correct equilibrium statistics — `test_sweep.py`
 
 ### Phase 2 Tests — Autocorrelation (`tests/test_autocorrelation.py`)
 

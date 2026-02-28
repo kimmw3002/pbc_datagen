@@ -172,5 +172,27 @@ PYBIND11_MODULE(_core, m) {
         .def("_delta_energy_tau", &pbc::AshkinTellerModel::_delta_energy_tau,
              py::arg("site"))
         .def("_metropolis_sweep", &pbc::AshkinTellerModel::_metropolis_sweep)
-        .def("_wolff_step", &pbc::AshkinTellerModel::_wolff_step);
+        .def("_wolff_step", &pbc::AshkinTellerModel::_wolff_step)
+        .def("sweep", [](pbc::AshkinTellerModel& self, int n_sweeps) {
+            auto result = self.sweep(n_sweeps);
+            auto n = static_cast<py::ssize_t>(n_sweeps);
+
+            py::array_t<double> energy(n, result.energy.data());
+            py::array_t<double> m_sigma(n, result.m_sigma.data());
+            py::array_t<double> abs_m_sigma(n, result.abs_m_sigma.data());
+            py::array_t<double> m_tau(n, result.m_tau.data());
+            py::array_t<double> abs_m_tau(n, result.abs_m_tau.data());
+            py::array_t<double> m_baxter(n, result.m_baxter.data());
+            py::array_t<double> abs_m_baxter(n, result.abs_m_baxter.data());
+
+            py::dict out;
+            out["energy"]       = std::move(energy);
+            out["m_sigma"]      = std::move(m_sigma);
+            out["abs_m_sigma"]  = std::move(abs_m_sigma);
+            out["m_tau"]        = std::move(m_tau);
+            out["abs_m_tau"]    = std::move(abs_m_tau);
+            out["m_baxter"]     = std::move(m_baxter);
+            out["abs_m_baxter"] = std::move(abs_m_baxter);
+            return out;
+        }, py::arg("n_sweeps"));
 }
