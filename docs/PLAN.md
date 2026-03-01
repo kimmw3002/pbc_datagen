@@ -56,69 +56,184 @@ Python O(N) recomputation vs C++ cached values. Includes AT remapped (U > 1) reg
 
 ### 1.5 C++ PT Inner Loop
 
-`src/cpp/pt_engine.hpp` — Templated parallel tempering hot loop. Keeps the
-entire sweep–exchange–histogram cycle in C++ to avoid Python loop overhead.
+`src/cpp/pt_engine.hpp` — Small, independently testable functions that each
+do one thing. Composed into `pt_rounds()` which is a thin loop calling them
+in order. Every function is bound via pybind11 and tested in isolation.
+
+temperatures sorted ascending: `temps[0] = T_min` (coldest),
+`temps[M-1] = T_max` (hottest). Slot 0 = cold end, slot M-1 = hot end.
+
+Directional label convention (ints):
+- `LABEL_NONE = 0` — no label yet
+- `LABEL_UP = 1` — last visited T_min (cold end, slot 0)
+- `LABEL_DOWN = -1` — last visited T_max (hot end, slot M-1)
+
+#### 1.5.1 `pt_exchange` — single-gap exchange decision
+
+```cpp
+bool pt_exchange(double E_i, double E_j, double T_i, double T_j, Rng& rng);
+```
+
+Pure function. Returns true (accept) or false (reject). Metropolis criterion:
+```
+A = min(1, exp((1/T_i - 1/T_j) × (E_i - E_j)))
+```
+When `T_i == T_j`, always returns true (Δ(1/T) = 0 → exp(0) = 1).
+No side effects — easy to test with exact values.
+
+#### 1.5.2 `pt_exchange_round` — M random swap proposals
 
 ```cpp
 template<typename Model>
-struct PTResult {
-    std::vector<int> replica_to_temp;    // final address map
-    std::vector<int> temp_to_replica;
-    std::vector<int> n_up;               // diffusion histograms per T slot
-    std::vector<int> n_down;
-    std::vector<int> labels;             // directional labels per replica
-    std::vector<int> n_accepts;          // swap accepts per gap (M-1)
-    std::vector<int> n_attempts;         // swap attempts per gap (M-1)
-    int round_trip_count;                // completed round trips
-    // per-T-slot observable streams (for Phase B equilibration checks):
-    std::vector<std::vector<double>> obs_streams;
-};
-
-template<typename Model>
-PTResult pt_rounds(
-    std::vector<Model>& replicas,        // M replicas (spin arrays stay in place)
-    const std::vector<double>& betas,    // M inverse temperatures (sorted)
-    std::vector<int>& replica_to_temp,   // address map (mutated in place)
-    std::vector<int>& temp_to_replica,   // inverse map (mutated in place)
-    std::vector<int>& labels,            // directional labels (mutated)
-    int n_rounds,                        // rounds of sweep(1) + exchange
-    Rng& rng,
-    bool track_observables = false       // Phase B needs obs streams; Phase A doesn't
+void pt_exchange_round(
+    std::vector<Model*>& replicas,       // M replicas (read energy only)
+    const std::vector<double>& temps,    // M temperatures, sorted ascending
+    std::vector<int>& r2t,               // replica_to_temp (mutated)
+    std::vector<int>& t2r,               // temp_to_replica (mutated)
+    std::vector<int>& n_accepts,         // per-gap accept count (mutated)
+    std::vector<int>& n_attempts,        // per-gap attempt count (mutated)
+    Rng& rng
 );
 ```
 
-**What happens each round:**
-1. Set each replica's temperature from `betas[replica_to_temp[r]]`, call `sweep(1)`.
-2. Even/odd adjacent Metropolis exchanges — on accept, swap address map entries.
-3. Update directional labels: replica at T_min → `up`, replica at T_max → `down`.
-4. Increment `n_up[t]` or `n_down[t]` based on label of replica at slot `t`.
-5. Check for completed round trips (up→down→up).
-6. If `track_observables`: read energy from `replicas[temp_to_replica[t]]` at
-   each T slot and append to `obs_streams[t]`.
+Makes M random swap proposals (like Metropolis picks N random sites):
+1. Pick a random gap `g = rng.rand_below(M - 1)`.
+2. Look up replicas at slots `g` and `g+1` via `t2r`, read their energies.
+3. Call `pt_exchange(E_g, E_{g+1}, temps[g], temps[g+1], rng)`.
+4. On accept: swap `r2t` and `t2r` entries. Increment `n_accepts[g]`.
+5. Always increment `n_attempts[g]`.
+6. Repeat M times.
 
-Bound in `bindings.cpp` three times via template instantiation:
+No parity tracking — every gap is reachable on every round.
+Testable: pass known energies + temps, check map changes and counts.
+
+#### 1.5.3 `pt_update_labels` — assign directional labels at extremes
+
 ```cpp
-m.def("pt_rounds_ising", &pt_rounds<IsingModel>);
-m.def("pt_rounds_bc", &pt_rounds<BlumeCapelModel>);
-m.def("pt_rounds_at", &pt_rounds<AshkinTellerModel>);
+void pt_update_labels(
+    std::vector<int>& labels,            // per-replica labels (mutated)
+    const std::vector<int>& t2r,         // temp_to_replica
+    int M                                // number of replicas
+);
 ```
 
-Python orchestration calls one C++ function per KTH iteration instead of
-looping over 512k rounds in Python. The outer KTH feedback loop (f(T),
-df/dT, temperature redistribution) stays in Python — it runs at most 100
-times, so speed is irrelevant there.
+- `labels[t2r[0]]` = `LABEL_UP` (replica at coldest slot → released upward)
+- `labels[t2r[M-1]]` = `LABEL_DOWN` (replica at hottest slot → released downward)
+- All other labels unchanged.
+
+Pure index arithmetic — trivially testable.
+
+#### 1.5.4 `pt_accumulate_histograms` — increment diffusion counters
+
+```cpp
+void pt_accumulate_histograms(
+    std::vector<int>& n_up,              // per-T-slot up counter (mutated)
+    std::vector<int>& n_down,            // per-T-slot down counter (mutated)
+    const std::vector<int>& labels,      // per-replica labels
+    const std::vector<int>& t2r,         // temp_to_replica
+    int M
+);
+```
+
+For each T slot `t`: look up `labels[t2r[t]]`. If `LABEL_UP` → `n_up[t]++`.
+If `LABEL_DOWN` → `n_down[t]++`. If `LABEL_NONE` → skip.
+
+Pure index arithmetic — trivially testable with synthetic labels.
+
+#### 1.5.5 `pt_count_round_trips` — detect completed round trips
+
+```cpp
+int pt_count_round_trips(
+    const std::vector<int>& labels,      // current labels (after update)
+    const std::vector<int>& prev_labels, // labels before this round's update
+    const std::vector<int>& t2r,         // temp_to_replica
+    int M
+);
+```
+
+A round trip completes when an `UP`-labeled replica reaches T_max (slot M-1)
+and gets relabeled `DOWN`. Specifically: check the replica at slot M-1 —
+if `prev_labels[r] == LABEL_UP` and `labels[r] == LABEL_DOWN`, that's one
+completed trip. Returns the count (0 or 1 per call, since only one replica
+sits at slot M-1).
+
+Testable with synthetic label arrays — no models needed.
+
+#### 1.5.6 `pt_collect_obs` — record per-T-slot observables
+
+```cpp
+template<typename Model>
+void pt_collect_obs(
+    std::vector<std::vector<double>>& obs_streams, // [M][n_rounds_so_far]
+    const std::vector<Model*>& replicas,
+    const std::vector<int>& t2r,
+    int M
+);
+```
+
+For each T slot `t`: read `replicas[t2r[t]]->energy()`, append to
+`obs_streams[t]`. Only called when `track_observables` is true.
+
+#### 1.5.7 `pt_rounds` — thin composition loop
+
+```cpp
+template<typename Model>
+PTResult pt_rounds(
+    std::vector<Model*>& replicas,       // M replicas
+    const std::vector<double>& temps,    // M temperatures, sorted ascending
+    std::vector<int>& r2t,               // address map (mutated)
+    std::vector<int>& t2r,               // inverse map (mutated)
+    std::vector<int>& labels,            // directional labels (mutated)
+    int n_rounds,
+    Rng& rng,
+    bool track_observables = false
+);
+```
+
+The loop body is just calls to the functions above:
+```
+for round in 0..n_rounds:
+    for each replica r:
+        replicas[r]->set_temperature(temps[r2t[r]])
+        replicas[r]->sweep(1)
+    prev_labels = copy(labels)
+    pt_exchange_round(replicas, temps, r2t, t2r, n_accepts, n_attempts, rng)
+    pt_update_labels(labels, t2r, M)
+    pt_accumulate_histograms(n_up, n_down, labels, t2r, M)
+    round_trip_count += pt_count_round_trips(labels, prev_labels, t2r, M)
+    if track_observables:
+        pt_collect_obs(obs_streams, replicas, t2r, M)
+```
+
+Returns `PTResult` dict with all accumulated state.
+
+Bound in `bindings.cpp` three times via template instantiation (only
+`pt_exchange_round`, `pt_collect_obs`, and `pt_rounds` are templated;
+the rest are plain functions):
+```cpp
+// Non-templated (bound once)
+m.def("pt_exchange", &pt_exchange);
+m.def("pt_update_labels", &pt_update_labels);
+m.def("pt_accumulate_histograms", &pt_accumulate_histograms);
+m.def("pt_count_round_trips", &pt_count_round_trips);
+
+// Templated (bound per model)
+m.def("pt_exchange_round_ising", ...);
+m.def("pt_collect_obs_ising", ...);
+m.def("pt_rounds_ising", ...);
+// ... _bc and _at variants
+```
 
 #### Steps
 
-- [ ] Step 1.5.1: `pt_engine.hpp` — `PTResult` struct, `pt_rounds()` template: sweep all replicas, even/odd exchanges, address map updates
-- [ ] Step 1.5.2: Directional labeling + diffusion histograms (n_up/n_down) + round-trip counting inside `pt_rounds()`
-- [ ] Step 1.5.3: Optional observable stream tracking (`track_observables` flag) for Phase B
-- [ ] Step 1.5.4: pybind11 bindings — `pt_rounds_ising`, `pt_rounds_bc`, `pt_rounds_at` + `PTResult` as dict/struct
-- [ ] Step 1.5.5: Update `_core.pyi` type stubs
-
-Tests: `tests/test_pt_engine.py` — address map consistency, exchange acceptance
-vs exact Boltzmann, directional labels, round-trip detection, observable stream
-correctness. All testable through pybind11 bindings.
+- [ ] Step 1.5.1: `pt_exchange()` — pure accept/reject function + pybind11 binding + tests
+- [ ] Step 1.5.2: `pt_exchange_round()` — M random gap proposals + map updates + binding + tests
+- [ ] Step 1.5.3: `pt_update_labels()` — label assignment at extremes + binding + tests
+- [ ] Step 1.5.4: `pt_accumulate_histograms()` — diffusion counter increments + binding + tests
+- [ ] Step 1.5.5: `pt_count_round_trips()` — round-trip detection + binding + tests
+- [ ] Step 1.5.6: `pt_collect_obs()` — per-T-slot energy recording + binding + tests
+- [ ] Step 1.5.7: `pt_rounds()` — thin composition loop + binding + integration test
+- [ ] Step 1.5.8: Update `_core.pyi` type stubs for all new functions
 
 ## Model Interface (contract between C++ models and Python orchestration)
 
@@ -159,7 +274,7 @@ changing any Python orchestration code.
 ### Architecture Overview
 
 Three-phase pipeline per Hamiltonian parameter value. No pilot run — start from
-geometric β spacing and let KTH tuning handle it. Parallelism is across param
+geometric T spacing and let KTH tuning handle it. Parallelism is across param
 values (embarrassingly parallel), not across replicas within a PT run.
 
 ```
@@ -172,18 +287,18 @@ values (embarrassingly parallel), not across replicas within a PT run.
  └─────┬─────┘    └──┬────┬──┘    └─────┬─────┘
        │              │    │              │
        │  locked      │    │ true τ_max   │
-       │  β ladder    │    │ (for thin)   │
+       │  T ladder    │    │ (for thin)   │
        ▼              │    ▼              ▼
  ┌───────────┐        │  ┌──────────┐  ┌────────┐
  │ Geometric │        └─▶│ ACF/τ_int│  │ HDF5   │
- │ β start   │           └──────────┘  │ I/O    │
+ │ T start   │           └──────────┘  │ I/O    │
  └───────────┘                         └────────┘
 
  Data flow summary:
  ───────────────────────────────────────────────────────────────────────────────
  Stage        Produces                    Consumed by
  ───────────────────────────────────────────────────────────────────────────────
- Phase A      tuned β array → LOCK        Phase B
+ Phase A      tuned T array → LOCK        Phase B
  Phase B      equilibrated streams,       Phase C
               true PT τ_max → LOCK
  Phase C      thinned snapshots           HDF5 I/O
@@ -308,15 +423,16 @@ Works with any model conforming to the **Model Interface** (see above).
 #### Exchange Logic
 
 Adjacent-only replica swaps maximize energy-distribution overlap.
-Even/odd alternating pattern: on even rounds propose swaps for pairs (0,1), (2,3), ...;
-on odd rounds propose (1,2), (3,4), .... This ensures every gap is attempted every 2 rounds.
+Each round makes M random swap proposals: pick a random gap `g` from
+`{0, ..., M-2}`, attempt exchange between slots `g` and `g+1`. Repeat M times.
+Same logic as Metropolis (N random site proposals per sweep).
 
-Metropolis acceptance criterion:
+Metropolis acceptance criterion (for adjacent slots i and i+1, T_i < T_{i+1}):
 ```
-Δβ = β_{i+1} - β_i
-ΔE = E_{i+1} - E_i
-A = min(1, exp(Δβ × ΔE))
+ΔE = E_i - E_{i+1}
+A = min(1, exp((1/T_i - 1/T_{i+1}) × ΔE))
 ```
+Since T_i < T_{i+1}, the factor `(1/T_i - 1/T_{i+1})` is always positive.
 On acceptance: swap temperature labels in the address map, NOT spin configurations.
 Copying large lattice arrays is wasteful; swapping a pair of integers is O(1).
 
@@ -388,7 +504,7 @@ and continues producing more.
 
 #### Phase A — Ladder Tuning (Katzgraber-Trebst-Huse 2006)
 
-Start from geometric β spacing and optimise temperature placement to **minimise
+Start from geometric T spacing and optimise temperature placement to **minimise
 round-trip time**, not to flatten acceptance rates. The key insight: concentrate
 temperatures at thermodynamic bottlenecks (e.g. phase transitions) where replica
 diffusion slows down. Acceptance rates should be *non-uniform* — smaller gaps
@@ -403,10 +519,10 @@ After each round of swap moves, increment the appropriate counter at each
 temperature slot based on the directional label of the replica sitting there.
 
 **Algorithm:**
-1. Start from geometric β spacing between β_min and β_max (M = `n_replicas`).
+1. Start from geometric T spacing between T_min and T_max (M = `n_replicas`).
 2. Set initial round count N_sw = 500.
-3. Run N_sw rounds of (`sweep(1)` on all replicas + 1 even/odd exchange
-   attempt). `sweep(1)` already performs Metropolis + Wolff internally.
+3. Run N_sw rounds of (`sweep(1)` on all replicas + M random exchange
+   proposals). `sweep(1)` already performs Metropolis + Wolff internally.
    After each round, update diffusion histograms using the directional
    labels from `RoundTripTracker`.
 4. Compute the steady-state up-fraction at each temperature:
@@ -519,7 +635,7 @@ The resulting `τ_max` is locked and passed to Phase C for thinning.
 - **Resume = read the HDF5.** The snapshots ARE the replica states. On resume:
   1. Open HDF5, count existing snapshots per `(param, T)` slot.
   2. Load the last snapshot at each T slot → replica spin state.
-  3. Restore address map + locked β ladder + τ_max from HDF5 attributes.
+  3. Restore address map + locked T ladder + τ_max from HDF5 attributes.
   4. Continue sweeping and appending until `n_snapshots` reached.
   State is only persisted after `>3τ_int` sweeps (i.e., at each snapshot save),
   so the worst-case data loss on crash is one thinning interval — acceptable.
@@ -527,7 +643,7 @@ The resulting `τ_max` is locked and passed to Phase C for thinning.
 
 #### Steps
 
-- [ ] Step 2.1.1: `PTEngine.__init__` — replica creation from geometric β ladder, model factory, address map initialisation, select correct `pt_rounds_*` C++ function based on model type
+- [ ] Step 2.1.1: `PTEngine.__init__` — replica creation from geometric T ladder, model factory, address map initialisation, select correct `pt_rounds_*` C++ function based on model type
 - [ ] Step 2.1.2: `tune_ladder()` — Phase A: outer KTH feedback loop in Python (call `pt_rounds()` for N_sw rounds → read f(T) from returned histograms → compute df/dT, η, redistribute T → damped update → check convergence). Doubling N_sw schedule, post-tuning acceptance rate safety check
 - [ ] Step 2.1.3: `equilibrate()` — Phase B: locked ladder, call `pt_rounds(..., track_observables=True)`, Welch t-test on returned obs streams, doubling scheme, measure true PT τ_int → lock τ_max
 - [ ] Step 2.1.4: `produce()` — Phase C: snapshot harvesting loop, call `pt_rounds()` for `3×τ_max` rounds between snapshots, read spins via `temp_to_replica`, stream to HDF5
@@ -619,7 +735,7 @@ For large L and long runs, holding all snapshots in RAM is infeasible.
 ```
 blume_capel_L64_D=1.5000_1709312456789.h5
 ├── .attrs                              # seed, model_type, L, param_value,
-│                                       # locked β ladder, τ_max, address_map,
+│                                       # locked T ladder, τ_max, address_map,
 │                                       # round_trip_stats, "complete" flag
 ├── T=2.269/
 │   ├── snapshots                       # (N, C, L, L) int8, resizable axis 0
@@ -650,7 +766,7 @@ to resume Phase C without a separate checkpoint file.
 #### Steps
 
 - [ ] Step 2.3.1: `SnapshotWriter` class — open/create HDF5, create groups, streaming append with flush
-- [ ] Step 2.3.2: `write_param_attrs()` — save β ladder, τ_max, address map as HDF5 attrs (updated each snapshot batch)
+- [ ] Step 2.3.2: `write_param_attrs()` — save T ladder, τ_max, address map as HDF5 attrs (updated each snapshot batch)
 - [ ] Step 2.3.3: `read_resume_state()` — load last snapshot per T slot + attrs for resume
 
 ---
@@ -711,16 +827,31 @@ python scripts/generate_dataset.py \
 - [ ] Unit: `tau_int` on white noise returns ≈ 0.5
 - [ ] Unit: `tau_int_multi` returns per-observable dict and correct bottleneck τ_max
 
-### Phase 1.5 Tests — C++ PT Inner Loop (`tests/test_pt_engine.py`)
+### Phase 1.5 Tests — C++ PT Inner Loop
 
-- [ ] Unit: Address map initialises to identity and inverse is consistent
-- [ ] Unit: Exchange acceptance matches exact Boltzmann formula (deterministic test)
-- [ ] Unit: On accepted exchange, address map updates correctly (no spin copy)
-- [ ] Unit: Even/odd alternation covers all gaps over 2 rounds
-- [ ] Unit: Directional labels assigned correctly (up at T_min, down at T_max)
-- [ ] Unit: Diffusion histograms (n_up, n_down) increment correctly per T slot
-- [ ] Unit: Round-trip detection: completed min→max→min counted, incomplete trips not counted
-- [ ] Unit: Observable streams (`track_observables=True`) record correct per-T-slot values
+#### `tests/test_pt_exchange.py` — exchange decision (Step 1.5.1)
+- [ ] Unit: Same T → always returns true (1/T_i - 1/T_j = 0)
+- [ ] Unit: Known E and T → exact accept probability over many calls
+- [ ] Unit: Extreme T gap with typical energies → always returns false
+
+#### `tests/test_pt_exchange_round.py` — M random swap proposals (Step 1.5.2)
+- [ ] Unit: After one round, total attempts across all gaps == M
+- [ ] Unit: After many rounds, every gap has attempts > 0 (uniform coverage)
+- [ ] Unit: On accepted swap, r2t and t2r stay inverse permutations
+- [ ] Unit: Same T → n_accepts == n_attempts at every gap
+
+#### `tests/test_pt_labels.py` — labels, histograms, round trips (Steps 1.5.3–1.5.5)
+- [ ] Unit: `pt_update_labels` sets UP at slot 0, DOWN at slot M-1, others unchanged
+- [ ] Unit: `pt_accumulate_histograms` increments n_up/n_down matching replica labels
+- [ ] Unit: `pt_accumulate_histograms` skips LABEL_NONE slots
+- [ ] Unit: `pt_count_round_trips` detects UP→DOWN transition at slot M-1
+- [ ] Unit: `pt_count_round_trips` returns 0 when no transition occurs
+
+#### `tests/test_pt_rounds.py` — composition loop integration (Steps 1.5.6–1.5.7)
+- [ ] Unit: `pt_collect_obs` records valid energies per T slot per round
+- [ ] Unit: `pt_rounds` with track_observables=False returns empty obs_streams
+- [ ] Integration: `pt_rounds` with close T over many rounds produces round trips > 0
+- [ ] Integration: f(T) monotonicity — UP fraction higher at cold end than hot end
 
 ### Phase 2 Tests — PT Orchestration (`tests/test_parallel_tempering.py`)
 
@@ -733,7 +864,7 @@ python scripts/generate_dataset.py \
 
 - [ ] Unit: `SnapshotWriter` creates correct HDF5 group hierarchy
 - [ ] Unit: `append_snapshot` grows dataset by 1 along axis 0, data matches
-- [ ] Unit: `write_param_attrs` round-trips β ladder, τ_max, address map through HDF5 attrs
+- [ ] Unit: `write_param_attrs` round-trips T ladder, τ_max, address map through HDF5 attrs
 - [ ] Unit: `read_resume_state` loads last snapshot per T slot and restores attrs
 
 ### Phase 2 Tests — Integration (`tests/test_integration.py`)
