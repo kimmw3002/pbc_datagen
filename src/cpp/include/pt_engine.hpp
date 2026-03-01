@@ -156,10 +156,9 @@ void pt_collect_obs(
 
 // ── 1.5.7  pt_rounds — thin composition loop ─────────────────────
 // Result struct returned to Python as a dict.
+// r2t, t2r, labels are NOT here — they're mutated in-place via
+// reference parameters and written back by the pybind11 binding.
 struct PTResult {
-    std::vector<int> r2t;
-    std::vector<int> t2r;
-    std::vector<int> labels;
     std::vector<int> n_accepts;
     std::vector<int> n_attempts;
     std::vector<int> n_up;
@@ -217,7 +216,6 @@ PTResult pt_rounds(
     }
 
     return PTResult{
-        r2t, t2r, labels,
         n_accepts, n_attempts, n_up, n_down,
         round_trip_count, std::move(obs_streams)
     };

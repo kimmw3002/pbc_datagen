@@ -486,8 +486,8 @@ The resulting `τ_max` is locked and passed to Phase C for thinning.
 
 #### Steps
 
-- [ ] Step 2.1.1: `PTEngine.__init__` — replica creation from geometric T ladder, model factory, address map initialisation, select correct `pt_rounds_*` C++ function based on model type
-- [ ] Step 2.1.2: `tune_ladder()` — Phase A: outer KTH feedback loop in Python (call `pt_rounds()` for N_sw rounds → read f(T) from returned histograms → compute df/dT, η, redistribute T → damped update → check convergence). Doubling N_sw schedule, post-tuning acceptance rate safety check
+- [x] Step 2.1.1: `PTEngine.__init__` — replica creation from geometric T ladder, model factory, address map initialisation, select correct `pt_rounds_*` C++ function based on model type
+- [x] Step 2.1.2: `tune_ladder()` — Phase A: outer KTH feedback loop in Python (call `pt_rounds()` for N_sw rounds → read f(T) from returned histograms → compute df/dT, η, redistribute T → damped update → check convergence). Doubling N_sw schedule, post-tuning acceptance rate safety check
 - [ ] Step 2.1.3: `equilibrate()` — Phase B: locked ladder, call `pt_rounds(..., track_observables=True)`, Welch t-test on returned obs streams, doubling scheme, measure true PT τ_int → lock τ_max
 - [ ] Step 2.1.4: `produce()` — Phase C: snapshot harvesting loop, call `pt_rounds()` for `3×τ_max` rounds between snapshots, read spins via `temp_to_replica`, stream to HDF5
 
@@ -702,9 +702,11 @@ python scripts/generate_dataset.py \
 
 ### Phase 2 Tests — PT Orchestration (`tests/test_parallel_tempering.py`)
 
-- [ ] Unit: KTH tuning concentrates temperatures at bottleneck (f(T) ≈ 0.5 region) on a known test case
-- [ ] Unit: KTH f(T) is approximately linear (R² > 0.99) after convergence
-- [ ] Unit: KTH convergence requires both f(T) linearity and temperature stability
+- [x] Unit: KTH redistribution concentrates temperatures at bottleneck (steep df/dT gap shrinks)
+- [x] Unit: KTH redistribution preserves endpoints and sorted order
+- [x] Unit: KTH convergence requires both f(T) linearity and temperature stability
+- [x] Integration: tune_ladder converges on 4×4 Ising, locks ladder
+- [x] Integration: tune_ladder aborts on absurd T range (convergence or acceptance failure)
 - [ ] Unit: Ladder is immutable during Phase B and Phase C (no T changes)
 
 ### Phase 2 Tests — I/O (`tests/test_io.py`)

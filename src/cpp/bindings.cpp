@@ -261,12 +261,11 @@ PYBIND11_MODULE(_core, m) {
         py::arg("labels"), py::arg("prev_labels"),
         py::arg("t2r"), py::arg("M"));
 
-    // Helper: convert PTResult to a Python dict
+    // Helper: convert PTResult to a Python dict.
+    // r2t, t2r, labels are NOT included — they're mutated in-place
+    // via ivec_to_list in each binding lambda.
     auto pt_result_to_dict = [](const pbc::PTResult& res) {
         py::dict out;
-        out["r2t"]              = res.r2t;
-        out["t2r"]              = res.t2r;
-        out["labels"]           = res.labels;
         out["n_accepts"]        = res.n_accepts;
         out["n_attempts"]       = res.n_attempts;
         out["n_up"]             = res.n_up;
@@ -420,9 +419,11 @@ PYBIND11_MODULE(_core, m) {
             auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
                                        n_rounds, rng, track_obs);
 
-            ivec_to_list(res.r2t, py_r2t);
-            ivec_to_list(res.t2r, py_t2r);
-            ivec_to_list(res.labels, py_labels);
+            // r2t, t2r, labels were mutated by pt_rounds via reference —
+            // write the final values back into the original Python lists.
+            ivec_to_list(r2t, py_r2t);
+            ivec_to_list(t2r, py_t2r);
+            ivec_to_list(labels, py_labels);
             return pt_result_to_dict(res);
         },
         py::arg("replicas"), py::arg("temps"),
@@ -446,9 +447,9 @@ PYBIND11_MODULE(_core, m) {
             auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
                                        n_rounds, rng, track_obs);
 
-            ivec_to_list(res.r2t, py_r2t);
-            ivec_to_list(res.t2r, py_t2r);
-            ivec_to_list(res.labels, py_labels);
+            ivec_to_list(r2t, py_r2t);
+            ivec_to_list(t2r, py_t2r);
+            ivec_to_list(labels, py_labels);
             return pt_result_to_dict(res);
         },
         py::arg("replicas"), py::arg("temps"),
@@ -472,9 +473,9 @@ PYBIND11_MODULE(_core, m) {
             auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
                                        n_rounds, rng, track_obs);
 
-            ivec_to_list(res.r2t, py_r2t);
-            ivec_to_list(res.t2r, py_t2r);
-            ivec_to_list(res.labels, py_labels);
+            ivec_to_list(r2t, py_r2t);
+            ivec_to_list(t2r, py_t2r);
+            ivec_to_list(labels, py_labels);
             return pt_result_to_dict(res);
         },
         py::arg("replicas"), py::arg("temps"),

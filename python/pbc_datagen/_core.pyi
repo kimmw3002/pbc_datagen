@@ -6,9 +6,8 @@ import numpy as np
 import numpy.typing as npt
 
 class PTResult(TypedDict):
-    r2t: list[int]
-    t2r: list[int]
-    labels: list[int]
+    # r2t, t2r, labels are mutated in-place on the Python lists passed
+    # to pt_rounds — they are NOT in this dict.
     n_accepts: list[int]
     n_attempts: list[int]
     n_up: list[int]
