@@ -24,7 +24,8 @@ AshkinTellerModel::AshkinTellerModel(int L, uint64_t seed)
       cached_four_spin_(2 * L * L),
       cached_sigma_sum_(L * L),
       cached_tau_sum_(L * L),
-      cached_baxter_sum_(L * L) {}
+      cached_baxter_sum_(L * L),
+      wl_in_cluster_(static_cast<size_t>(L * L), 0) {}
 
 void AshkinTellerModel::set_temperature(double T) {
     if (T <= 0.0) {
@@ -297,17 +298,17 @@ int AshkinTellerModel::_wolff_step() {
     int seed = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
     int8_t seed_target = target_at(static_cast<size_t>(seed));
 
-    // --- 5. Grow the cluster via DFS ---
-    std::vector<bool> in_cluster(static_cast<size_t>(N), false);
-    std::vector<int> stack;
-    stack.push_back(seed);
-    in_cluster[static_cast<size_t>(seed)] = true;
-    int cluster_size = 0;
+    // --- 5. Grow the cluster via DFS (persistent workspace) ---
+    wl_stack_.clear();
+    wl_cluster_sites_.clear();
 
-    while (!stack.empty()) {
-        int site = stack.back();
-        stack.pop_back();
-        ++cluster_size;
+    wl_stack_.push_back(seed);
+    wl_in_cluster_[static_cast<size_t>(seed)] = 1;
+
+    while (!wl_stack_.empty()) {
+        int site = wl_stack_.back();
+        wl_stack_.pop_back();
+        wl_cluster_sites_.push_back(site);
 
         auto sdx = static_cast<size_t>(site);
         int8_t f_site = fixed_at(sdx);
@@ -315,7 +316,7 @@ int AshkinTellerModel::_wolff_step() {
         for (int d = 0; d < 4; ++d) {
             int j = nbr[static_cast<size_t>(site * 4 + d)];
             auto jdx = static_cast<size_t>(j);
-            if (in_cluster[jdx]) continue;
+            if (wl_in_cluster_[jdx]) continue;
 
             // Only aligned target-variable neighbors can join
             if (target_at(jdx) != seed_target) continue;
@@ -326,13 +327,16 @@ int AshkinTellerModel::_wolff_step() {
                                : p_anti;
 
             if (rng.uniform() < p_add) {
-                in_cluster[jdx] = true;
-                stack.push_back(j);
+                wl_in_cluster_[jdx] = 1;
+                wl_stack_.push_back(j);
             }
         }
     }
 
+    int cluster_size = static_cast<int>(wl_cluster_sites_.size());
+
     // --- 6. Flip the cluster and update cached observables ---
+    // Only iterate over cluster members — O(cluster_size), not O(N).
     //
     // Bond caches: only boundary bonds (cluster ↔ non-cluster) change.
     // Interior bonds (both endpoints flip) cancel out.
@@ -344,15 +348,14 @@ int AshkinTellerModel::_wolff_step() {
     int d_sigma_c = 0, d_tau_c = 0, d_four = 0;
     int d_sigma_sum = 0, d_tau_sum = 0, d_baxter_sum = 0;
 
-    for (int i = 0; i < N; ++i) {
-        if (!in_cluster[static_cast<size_t>(i)]) continue;
-        auto idx = static_cast<size_t>(i);
+    for (int site : wl_cluster_sites_) {
+        auto idx = static_cast<size_t>(site);
         int8_t si = sigma[idx], ti = tau[idx];
 
         // Boundary bond contributions (pre-flip values)
         for (int d = 0; d < 4; ++d) {
-            int j = nbr[static_cast<size_t>(i * 4 + d)];
-            if (in_cluster[static_cast<size_t>(j)]) continue;
+            int j = nbr[static_cast<size_t>(site * 4 + d)];
+            if (wl_in_cluster_[static_cast<size_t>(j)]) continue;
             auto jdx = static_cast<size_t>(j);
             int8_t sj = sigma[jdx], tj = tau[jdx];
 
@@ -393,6 +396,11 @@ int AshkinTellerModel::_wolff_step() {
     cached_sigma_sum_ += d_sigma_sum;
     cached_tau_sum_ += d_tau_sum;
     cached_baxter_sum_ += d_baxter_sum;
+
+    // Clear in_cluster for only the sites we used — O(cluster_size).
+    for (int site : wl_cluster_sites_) {
+        wl_in_cluster_[static_cast<size_t>(site)] = 0;
+    }
 
     return cluster_size;
 }

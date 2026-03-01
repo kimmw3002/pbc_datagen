@@ -16,7 +16,8 @@ IsingModel::IsingModel(int L, uint64_t seed)
       nbr(make_neighbor_table(L)),
       rng(seed),
       cached_energy_(-2 * L * L),    // all aligned: each of 2N bonds contributes -1
-      cached_m_sum_(L * L) {}        // all +1: sum = N
+      cached_m_sum_(L * L),
+      wl_in_cluster_(static_cast<size_t>(L * L), 0) {}        // all +1: sum = N
 
 void IsingModel::set_temperature(double T) {
     if (T <= 0.0) {
@@ -110,55 +111,60 @@ int IsingModel::_wolff_step() {
     int seed = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
     int8_t seed_spin = spin[static_cast<size_t>(seed)];
 
-    // Track which sites belong to the cluster
-    std::vector<bool> in_cluster(static_cast<size_t>(N), false);
+    // Reuse persistent workspace (no heap allocation).
+    // wl_in_cluster_ was zeroed for exactly the sites used last call.
+    wl_stack_.clear();
+    wl_cluster_sites_.clear();
 
-    // DFS stack for growing the cluster
-    std::vector<int> stack;
-    stack.push_back(seed);
-    in_cluster[static_cast<size_t>(seed)] = true;
-    int cluster_size = 0;
+    wl_stack_.push_back(seed);
+    wl_in_cluster_[static_cast<size_t>(seed)] = 1;
 
-    while (!stack.empty()) {
-        int site = stack.back();
-        stack.pop_back();
-        ++cluster_size;
+    while (!wl_stack_.empty()) {
+        int site = wl_stack_.back();
+        wl_stack_.pop_back();
+        wl_cluster_sites_.push_back(site);
 
         // Try to add each of the 4 neighbors
         for (int d = 0; d < 4; ++d) {
             int j = nbr[static_cast<size_t>(site * 4 + d)];
-            if (!in_cluster[static_cast<size_t>(j)]
+            if (!wl_in_cluster_[static_cast<size_t>(j)]
                 && spin[static_cast<size_t>(j)] == seed_spin
                 && rng.uniform() < p_add) {
-                in_cluster[static_cast<size_t>(j)] = true;
-                stack.push_back(j);
+                wl_in_cluster_[static_cast<size_t>(j)] = 1;
+                wl_stack_.push_back(j);
             }
         }
     }
 
+    int cluster_size = static_cast<int>(wl_cluster_sites_.size());
+
     // Flip the cluster and update cached observables.
+    // Only iterate over cluster members — O(cluster_size), not O(N).
     //
     // Energy: only boundary bonds (cluster ↔ non-cluster) change.
     // Each such bond (i,j) contributes -s_i*s_j to H.  After flipping
     // site i, the bond becomes -(-s_i)*s_j = +s_i*s_j.  Net change
     // per boundary bond = 2*s_i*s_j.  Interior bonds (both flip) cancel.
     int delta_energy = 0;
-    for (int i = 0; i < N; ++i) {
-        if (!in_cluster[static_cast<size_t>(i)]) continue;
+    for (int site : wl_cluster_sites_) {
+        auto idx = static_cast<size_t>(site);
         for (int d = 0; d < 4; ++d) {
-            int j = nbr[static_cast<size_t>(i * 4 + d)];
-            if (!in_cluster[static_cast<size_t>(j)]) {
-                delta_energy += 2 * spin[static_cast<size_t>(i)]
-                                  * spin[static_cast<size_t>(j)];
+            int j = nbr[static_cast<size_t>(site * 4 + d)];
+            if (!wl_in_cluster_[static_cast<size_t>(j)]) {
+                delta_energy += 2 * spin[idx] * spin[static_cast<size_t>(j)];
             }
         }
-        spin[static_cast<size_t>(i)] =
-            static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
+        spin[idx] = static_cast<int8_t>(-spin[idx]);
     }
     cached_energy_ += delta_energy;
 
     // Magnetization: all cluster spins were seed_spin, now -seed_spin.
     cached_m_sum_ -= 2 * seed_spin * cluster_size;
+
+    // Clear in_cluster for only the sites we used — O(cluster_size).
+    for (int site : wl_cluster_sites_) {
+        wl_in_cluster_[static_cast<size_t>(site)] = 0;
+    }
 
     return cluster_size;
 }

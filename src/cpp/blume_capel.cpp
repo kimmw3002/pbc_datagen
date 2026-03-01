@@ -18,7 +18,8 @@ BlumeCapelModel::BlumeCapelModel(int L, uint64_t seed)
       rng(seed),
       cached_energy_(-2.0 * L * L),  // all aligned, D=0: -2N + 0*N
       cached_m_sum_(L * L),           // all +1: sum = N
-      cached_sq_sum_(L * L) {}        // all 1²: sum = N
+      cached_sq_sum_(L * L),
+      wl_in_cluster_(static_cast<size_t>(L * L), 0) {}        // all 1²: sum = N
 
 void BlumeCapelModel::set_temperature(double T) {
     if (T <= 0.0) {
@@ -80,19 +81,17 @@ int BlumeCapelModel::_wolff_step() {
     // contribution cancels exactly when a cluster is flipped.
     double p_add = 1.0 - std::exp(-2.0 / T_);
 
-    // Track which sites belong to the cluster
-    std::vector<bool> in_cluster(static_cast<size_t>(N), false);
+    // Reuse persistent workspace (no heap allocation).
+    wl_stack_.clear();
+    wl_cluster_sites_.clear();
 
-    // Explicit DFS stack (not recursion — avoids stack overflow on large lattices)
-    std::vector<int> stack;
-    stack.push_back(seed);
-    in_cluster[static_cast<size_t>(seed)] = true;
-    int cluster_size = 0;
+    wl_stack_.push_back(seed);
+    wl_in_cluster_[static_cast<size_t>(seed)] = 1;
 
-    while (!stack.empty()) {
-        int site = stack.back();
-        stack.pop_back();
-        ++cluster_size;
+    while (!wl_stack_.empty()) {
+        int site = wl_stack_.back();
+        wl_stack_.pop_back();
+        wl_cluster_sites_.push_back(site);
 
         // Try to add each of the 4 neighbors
         for (int d = 0; d < 4; ++d) {
@@ -101,36 +100,41 @@ int BlumeCapelModel::_wolff_step() {
             //                (2) have the same spin as the seed (±1),
             //                (3) pass the bond activation coin flip.
             // Spin-0 neighbors naturally fail check (2) and act as barriers.
-            if (!in_cluster[static_cast<size_t>(j)]
+            if (!wl_in_cluster_[static_cast<size_t>(j)]
                 && spin[static_cast<size_t>(j)] == seed_spin
                 && rng.uniform() < p_add) {
-                in_cluster[static_cast<size_t>(j)] = true;
-                stack.push_back(j);
+                wl_in_cluster_[static_cast<size_t>(j)] = 1;
+                wl_stack_.push_back(j);
             }
         }
     }
 
-    // Flip cluster and update cache.
+    int cluster_size = static_cast<int>(wl_cluster_sites_.size());
+
+    // Flip cluster and update cache — O(cluster_size), not O(N).
     // Energy: only boundary bonds change (same as Ising).
     // Crystal field: (-s)² = s², so D term is unchanged.
     // Quadrupole: unchanged for same reason.
     // Magnetization: all cluster spins were seed_spin, now -seed_spin.
     int delta_energy = 0;
-    for (int i = 0; i < N; ++i) {
-        if (!in_cluster[static_cast<size_t>(i)]) continue;
+    for (int site : wl_cluster_sites_) {
+        auto idx = static_cast<size_t>(site);
         for (int d = 0; d < 4; ++d) {
-            int j = nbr[static_cast<size_t>(i * 4 + d)];
-            if (!in_cluster[static_cast<size_t>(j)]) {
-                delta_energy += 2 * spin[static_cast<size_t>(i)]
-                                  * spin[static_cast<size_t>(j)];
+            int j = nbr[static_cast<size_t>(site * 4 + d)];
+            if (!wl_in_cluster_[static_cast<size_t>(j)]) {
+                delta_energy += 2 * spin[idx] * spin[static_cast<size_t>(j)];
             }
         }
-        spin[static_cast<size_t>(i)] =
-            static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
+        spin[idx] = static_cast<int8_t>(-spin[idx]);
     }
     cached_energy_ += delta_energy;
     cached_m_sum_ -= 2 * seed_spin * cluster_size;
     // cached_sq_sum_ unchanged: (-s)² = s²
+
+    // Clear in_cluster for only the sites we used — O(cluster_size).
+    for (int site : wl_cluster_sites_) {
+        wl_in_cluster_[static_cast<size_t>(site)] = 0;
+    }
 
     return cluster_size;
 }

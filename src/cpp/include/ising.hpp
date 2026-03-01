@@ -29,6 +29,13 @@ struct IsingModel {
     int cached_energy_;             // H = -J Σ_{<ij>} s_i s_j
     int cached_m_sum_;              // Σ_i s_i  (raw sum, NOT divided by N)
 
+    // Persistent Wolff workspace — allocated once in constructor, reused
+    // every _wolff_step() call to avoid per-step heap allocations.
+    // char instead of bool: vector<bool> packs bits (slower per-access).
+    std::vector<char> wl_in_cluster_;       // 1 if site is in cluster
+    std::vector<int>  wl_stack_;            // DFS frontier
+    std::vector<int>  wl_cluster_sites_;    // sites that were added
+
     // Construct an L×L Ising model.  Spins start in the cold state
     // (all +1).  Temperature must be set separately via set_temperature().
     IsingModel(int L, uint64_t seed);

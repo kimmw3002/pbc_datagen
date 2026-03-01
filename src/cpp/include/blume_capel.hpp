@@ -33,6 +33,11 @@ struct BlumeCapelModel {
     int cached_m_sum_;              // Σ_i s_i
     int cached_sq_sum_;             // Σ_i s_i²  (also needed by set_crystal_field)
 
+    // Persistent Wolff workspace — allocated once, reused every step.
+    std::vector<char> wl_in_cluster_;
+    std::vector<int>  wl_stack_;
+    std::vector<int>  wl_cluster_sites_;
+
     // Construct an L×L Blume-Capel model.  Spins start in the cold state
     // (all +1).  Temperature and crystal field must be set separately.
     BlumeCapelModel(int L, uint64_t seed);

@@ -40,6 +40,11 @@ struct AshkinTellerModel {
     int cached_tau_sum_;            // Σ_i τ_i
     int cached_baxter_sum_;         // Σ_i σ_i τ_i
 
+    // Persistent Wolff workspace — allocated once, reused every step.
+    std::vector<char> wl_in_cluster_;
+    std::vector<int>  wl_stack_;
+    std::vector<int>  wl_cluster_sites_;
+
     // Construct an L×L Ashkin-Teller model.  Both σ and τ start in the
     // cold state (all +1).  Temperature and U must be set separately.
     AshkinTellerModel(int L, uint64_t seed);
