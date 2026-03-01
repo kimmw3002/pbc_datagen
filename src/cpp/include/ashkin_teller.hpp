@@ -30,6 +30,16 @@ struct AshkinTellerModel {
     std::vector<int32_t> nbr;       // PBC neighbor table, length N*4
     Rng rng;                        // PRNG instance
 
+    // Cached observables — updated incrementally on every spin mutation.
+    // Energy is stored as three independent sums so set_four_spin_coupling()
+    // can adjust the U-dependent part without recomputing everything.
+    int cached_sigma_coupling_;     // Σ_{<ij>} σ_i σ_j  (each bond counted once)
+    int cached_tau_coupling_;       // Σ_{<ij>} τ_i τ_j
+    int cached_four_spin_;          // Σ_{<ij>} σ_i σ_j τ_i τ_j
+    int cached_sigma_sum_;          // Σ_i σ_i
+    int cached_tau_sum_;            // Σ_i τ_i
+    int cached_baxter_sum_;         // Σ_i σ_i τ_i
+
     // Construct an L×L Ashkin-Teller model.  Both σ and τ start in the
     // cold state (all +1).  Temperature and U must be set separately.
     AshkinTellerModel(int L, uint64_t seed);

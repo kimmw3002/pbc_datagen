@@ -28,6 +28,11 @@ struct BlumeCapelModel {
     std::vector<int32_t> nbr;       // PBC neighbor table, length N*4
     Rng rng;                        // PRNG instance
 
+    // Cached observables — updated incrementally on every spin mutation.
+    double cached_energy_;          // H = -J Σ_{<ij>} s_i s_j + D Σ_i s_i²
+    int cached_m_sum_;              // Σ_i s_i
+    int cached_sq_sum_;             // Σ_i s_i²  (also needed by set_crystal_field)
+
     // Construct an L×L Blume-Capel model.  Spins start in the cold state
     // (all +1).  Temperature and crystal field must be set separately.
     BlumeCapelModel(int L, uint64_t seed);

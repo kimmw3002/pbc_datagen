@@ -17,7 +17,14 @@ AshkinTellerModel::AshkinTellerModel(int L, uint64_t seed)
       sigma(static_cast<size_t>(L * L), int8_t{1}),   // cold start: all +1
       tau(static_cast<size_t>(L * L), int8_t{1}),      // cold start: all +1
       nbr(make_neighbor_table(L)),
-      rng(seed) {}
+      rng(seed),
+      // Cold start: 2N bonds, each product = +1.
+      cached_sigma_coupling_(2 * L * L),
+      cached_tau_coupling_(2 * L * L),
+      cached_four_spin_(2 * L * L),
+      cached_sigma_sum_(L * L),
+      cached_tau_sum_(L * L),
+      cached_baxter_sum_(L * L) {}
 
 void AshkinTellerModel::set_temperature(double T) {
     if (T <= 0.0) {
@@ -41,7 +48,24 @@ void AshkinTellerModel::set_sigma(int site, int8_t value) {
     if (value != 1 && value != -1) {
         throw std::invalid_argument("sigma spin value must be +1 or -1");
     }
-    sigma[static_cast<size_t>(site)] = value;
+    auto sdx = static_cast<size_t>(site);
+    int8_t old_si = sigma[sdx];
+    if (old_si == value) return;
+
+    int8_t ti = tau[sdx];
+    // Compute neighbor sums for bond cache updates
+    int sigma_nbr = 0, sigma_tau_nbr = 0;
+    for (int d = 0; d < 4; ++d) {
+        auto j = static_cast<size_t>(nbr[static_cast<size_t>(site * 4 + d)]);
+        sigma_nbr += sigma[j];
+        sigma_tau_nbr += sigma[j] * tau[j];
+    }
+    cached_sigma_coupling_ -= 2 * old_si * sigma_nbr;
+    cached_four_spin_ -= 2 * old_si * ti * sigma_tau_nbr;
+    cached_sigma_sum_ -= 2 * old_si;
+    cached_baxter_sum_ -= 2 * old_si * ti;
+
+    sigma[sdx] = value;
 }
 
 void AshkinTellerModel::set_tau(int site, int8_t value) {
@@ -51,80 +75,52 @@ void AshkinTellerModel::set_tau(int site, int8_t value) {
     if (value != 1 && value != -1) {
         throw std::invalid_argument("tau spin value must be +1 or -1");
     }
-    tau[static_cast<size_t>(site)] = value;
+    auto sdx = static_cast<size_t>(site);
+    int8_t old_ti = tau[sdx];
+    if (old_ti == value) return;
+
+    int8_t si = sigma[sdx];
+    int tau_nbr = 0, sigma_tau_nbr = 0;
+    for (int d = 0; d < 4; ++d) {
+        auto j = static_cast<size_t>(nbr[static_cast<size_t>(site * 4 + d)]);
+        tau_nbr += tau[j];
+        sigma_tau_nbr += sigma[j] * tau[j];
+    }
+    cached_tau_coupling_ -= 2 * old_ti * tau_nbr;
+    cached_four_spin_ -= 2 * si * old_ti * sigma_tau_nbr;
+    cached_tau_sum_ -= 2 * old_ti;
+    cached_baxter_sum_ -= 2 * si * old_ti;
+
+    tau[sdx] = value;
 }
 
 double AshkinTellerModel::energy() const {
-    // H = -J Σ σ_i σ_j  -  J Σ τ_i τ_j  -  U Σ σ_i σ_j τ_i τ_j
-    //
-    // Sum over all (site, neighbor) pairs — each bond counted twice — then halve.
-    int sigma_sum = 0;
-    int tau_sum = 0;
-    int four_spin_sum = 0;
-
-    for (int i = 0; i < N; ++i) {
-        int si = sigma[static_cast<size_t>(i)];
-        int ti = tau[static_cast<size_t>(i)];
-        for (int d = 0; d < 4; ++d) {
-            auto j = static_cast<size_t>(nbr[static_cast<size_t>(i * 4 + d)]);
-            int sj = sigma[j];
-            int tj = tau[j];
-            sigma_sum    += si * sj;
-            tau_sum      += ti * tj;
-            four_spin_sum += si * sj * ti * tj;
-        }
-    }
-
-    // Each bond was counted twice (once from each endpoint)
-    return -sigma_sum / 2.0 - tau_sum / 2.0 - U_ * four_spin_sum / 2.0;
+    return -cached_sigma_coupling_ - cached_tau_coupling_
+           - U_ * cached_four_spin_;
 }
 
 double AshkinTellerModel::m_sigma() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += sigma[static_cast<size_t>(i)];
-    }
-    return static_cast<double>(sum) / N;
+    return static_cast<double>(cached_sigma_sum_) / N;
 }
 
 double AshkinTellerModel::abs_m_sigma() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += sigma[static_cast<size_t>(i)];
-    }
-    return std::abs(static_cast<double>(sum)) / N;
+    return std::abs(static_cast<double>(cached_sigma_sum_)) / N;
 }
 
 double AshkinTellerModel::m_tau() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += tau[static_cast<size_t>(i)];
-    }
-    return static_cast<double>(sum) / N;
+    return static_cast<double>(cached_tau_sum_) / N;
 }
 
 double AshkinTellerModel::abs_m_tau() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += tau[static_cast<size_t>(i)];
-    }
-    return std::abs(static_cast<double>(sum)) / N;
+    return std::abs(static_cast<double>(cached_tau_sum_)) / N;
 }
 
 double AshkinTellerModel::m_baxter() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += sigma[static_cast<size_t>(i)] * tau[static_cast<size_t>(i)];
-    }
-    return static_cast<double>(sum) / N;
+    return static_cast<double>(cached_baxter_sum_) / N;
 }
 
 double AshkinTellerModel::abs_m_baxter() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += sigma[static_cast<size_t>(i)] * tau[static_cast<size_t>(i)];
-    }
-    return std::abs(static_cast<double>(sum)) / N;
+    return std::abs(static_cast<double>(cached_baxter_sum_)) / N;
 }
 
 double AshkinTellerModel::_delta_energy_sigma(int site) const {
@@ -171,16 +167,29 @@ double AshkinTellerModel::_delta_energy_tau(int site) const {
 
 int AshkinTellerModel::_metropolis_sweep() {
     // 2N proposals: N for σ flips, then N for τ flips.
-    // Operates in the physical (σ, τ) basis regardless of U.
+    // Neighbor sums are computed inline so bond caches can be updated.
     int accepted = 0;
 
     // --- N σ-flip proposals ---
     for (int step = 0; step < N; ++step) {
         int site = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
-        double dE = _delta_energy_sigma(site);
+        auto sdx = static_cast<size_t>(site);
+        int8_t si = sigma[sdx], ti = tau[sdx];
+
+        int sigma_nbr = 0, sigma_tau_nbr = 0;
+        for (int d = 0; d < 4; ++d) {
+            auto j = static_cast<size_t>(nbr[static_cast<size_t>(site * 4 + d)]);
+            sigma_nbr += sigma[j];
+            sigma_tau_nbr += sigma[j] * tau[j];
+        }
+
+        double dE = 2.0 * si * (sigma_nbr + U_ * ti * sigma_tau_nbr);
         if (dE <= 0.0 || rng.uniform() < std::exp(-dE / T_)) {
-            sigma[static_cast<size_t>(site)] =
-                static_cast<int8_t>(-sigma[static_cast<size_t>(site)]);
+            cached_sigma_coupling_ -= 2 * si * sigma_nbr;
+            cached_four_spin_ -= 2 * si * ti * sigma_tau_nbr;
+            cached_sigma_sum_ -= 2 * si;
+            cached_baxter_sum_ -= 2 * si * ti;
+            sigma[sdx] = static_cast<int8_t>(-si);
             ++accepted;
         }
     }
@@ -188,10 +197,23 @@ int AshkinTellerModel::_metropolis_sweep() {
     // --- N τ-flip proposals ---
     for (int step = 0; step < N; ++step) {
         int site = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
-        double dE = _delta_energy_tau(site);
+        auto sdx = static_cast<size_t>(site);
+        int8_t si = sigma[sdx], ti = tau[sdx];
+
+        int tau_nbr = 0, sigma_tau_nbr = 0;
+        for (int d = 0; d < 4; ++d) {
+            auto j = static_cast<size_t>(nbr[static_cast<size_t>(site * 4 + d)]);
+            tau_nbr += tau[j];
+            sigma_tau_nbr += sigma[j] * tau[j];
+        }
+
+        double dE = 2.0 * ti * (tau_nbr + U_ * si * sigma_tau_nbr);
         if (dE <= 0.0 || rng.uniform() < std::exp(-dE / T_)) {
-            tau[static_cast<size_t>(site)] =
-                static_cast<int8_t>(-tau[static_cast<size_t>(site)]);
+            cached_tau_coupling_ -= 2 * ti * tau_nbr;
+            cached_four_spin_ -= 2 * si * ti * sigma_tau_nbr;
+            cached_tau_sum_ -= 2 * ti;
+            cached_baxter_sum_ -= 2 * si * ti;
+            tau[sdx] = static_cast<int8_t>(-ti);
             ++accepted;
         }
     }
@@ -310,22 +332,67 @@ int AshkinTellerModel::_wolff_step() {
         }
     }
 
-    // --- 6. Flip the cluster ---
+    // --- 6. Flip the cluster and update cached observables ---
+    //
+    // Bond caches: only boundary bonds (cluster ↔ non-cluster) change.
+    // Interior bonds (both endpoints flip) cancel out.
+    //
+    // Mode 0 (flip σ):        sigma_coupling + four_spin change
+    // Mode 1/3 (flip τ):      tau_coupling + four_spin change
+    // Mode 2 (flip both σ,τ): sigma_coupling + tau_coupling change,
+    //                          four_spin UNCHANGED (both flip → cancels)
+    int d_sigma_c = 0, d_tau_c = 0, d_four = 0;
+    int d_sigma_sum = 0, d_tau_sum = 0, d_baxter_sum = 0;
+
     for (int i = 0; i < N; ++i) {
         if (!in_cluster[static_cast<size_t>(i)]) continue;
         auto idx = static_cast<size_t>(i);
+        int8_t si = sigma[idx], ti = tau[idx];
+
+        // Boundary bond contributions (pre-flip values)
+        for (int d = 0; d < 4; ++d) {
+            int j = nbr[static_cast<size_t>(i * 4 + d)];
+            if (in_cluster[static_cast<size_t>(j)]) continue;
+            auto jdx = static_cast<size_t>(j);
+            int8_t sj = sigma[jdx], tj = tau[jdx];
+
+            if (mode == 0) {
+                d_sigma_c -= 2 * si * sj;
+                d_four -= 2 * si * sj * ti * tj;
+            } else if (mode == 2) {
+                d_sigma_c -= 2 * si * sj;
+                d_tau_c -= 2 * ti * tj;
+                // four_spin unchanged
+            } else {  // mode 1 or 3: flip τ only
+                d_tau_c -= 2 * ti * tj;
+                d_four -= 2 * si * sj * ti * tj;
+            }
+        }
+
+        // Magnetization sums + flip
         if (mode == 0) {
-            // σ-clustering (non-remapped): flip σ only
-            sigma[idx] = static_cast<int8_t>(-sigma[idx]);
+            d_sigma_sum -= 2 * si;
+            d_baxter_sum -= 2 * si * ti;
+            sigma[idx] = static_cast<int8_t>(-si);
         } else if (mode == 2) {
-            // σ-clustering (remapped): flip both σ and τ
-            sigma[idx] = static_cast<int8_t>(-sigma[idx]);
-            tau[idx]   = static_cast<int8_t>(-tau[idx]);
-        } else {
-            // mode 1 (τ-clustering) or mode 3 (s-clustering): flip τ only
-            tau[idx] = static_cast<int8_t>(-tau[idx]);
+            d_sigma_sum -= 2 * si;
+            d_tau_sum -= 2 * ti;
+            // baxter unchanged: (-σ)(-τ) = στ
+            sigma[idx] = static_cast<int8_t>(-si);
+            tau[idx]   = static_cast<int8_t>(-ti);
+        } else {  // mode 1 or 3: flip τ only
+            d_tau_sum -= 2 * ti;
+            d_baxter_sum -= 2 * si * ti;
+            tau[idx] = static_cast<int8_t>(-ti);
         }
     }
+
+    cached_sigma_coupling_ += d_sigma_c;
+    cached_tau_coupling_ += d_tau_c;
+    cached_four_spin_ += d_four;
+    cached_sigma_sum_ += d_sigma_sum;
+    cached_tau_sum_ += d_tau_sum;
+    cached_baxter_sum_ += d_baxter_sum;
 
     return cluster_size;
 }

@@ -43,6 +43,17 @@ Tests: `tests/ashkin_teller/` — test_model.py, test_wolff.py, test_metropolis.
 
 `src/cpp/bindings.cpp` — All three models fully bound: constructors, properties (L, T, spins/sigma/tau), observables, internal update methods, and `sweep()` returning numpy dict. Type stubs in `_core.pyi`.
 
+### 1.4.1 O(1) Observable Caching ✅
+
+All three models cache observables incrementally — `energy()`, `magnetization()`, etc. return
+in O(1) instead of O(N). Caches update on every mutation path: `set_spin`/`set_sigma`/`set_tau`,
+`_metropolis_sweep()`, and `_wolff_step()`. Hamiltonian parameter changes (`set_crystal_field`,
+`set_four_spin_coupling`) also keep caches consistent. AT stores three bond coupling sums
+separately so `energy()` recomputes from `−σ_c − τ_c − U·four` when U changes.
+
+Tests: `tests/test_observable_cache.py` — 14 tests across all 3 models × 4–5 mutation paths,
+Python O(N) recomputation vs C++ cached values. Includes AT remapped (U > 1) regime.
+
 ### 1.5 C++ PT Inner Loop
 
 `src/cpp/pt_engine.hpp` — Templated parallel tempering hot loop. Keeps the

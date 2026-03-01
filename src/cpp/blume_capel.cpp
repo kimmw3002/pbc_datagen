@@ -15,7 +15,10 @@ BlumeCapelModel::BlumeCapelModel(int L, uint64_t seed)
       D_(0.0),
       spin(static_cast<size_t>(L * L), int8_t{1}),   // cold start: all +1
       nbr(make_neighbor_table(L)),
-      rng(seed) {}
+      rng(seed),
+      cached_energy_(-2.0 * L * L),  // all aligned, D=0: -2N + 0*N
+      cached_m_sum_(L * L),           // all +1: sum = N
+      cached_sq_sum_(L * L) {}        // all 1²: sum = N
 
 void BlumeCapelModel::set_temperature(double T) {
     if (T <= 0.0) {
@@ -25,6 +28,7 @@ void BlumeCapelModel::set_temperature(double T) {
 }
 
 void BlumeCapelModel::set_crystal_field(double D) {
+    cached_energy_ += (D - D_) * cached_sq_sum_;
     D_ = D;
 }
 
@@ -35,56 +39,30 @@ void BlumeCapelModel::set_spin(int site, int8_t value) {
     if (value != 1 && value != -1 && value != 0) {
         throw std::invalid_argument("spin value must be -1, 0, or +1");
     }
+    int8_t old = spin[static_cast<size_t>(site)];
+    if (old == value) return;
+
+    cached_energy_ += _delta_energy(site, value);
+    cached_m_sum_ += (value - old);
+    cached_sq_sum_ += (value * value - old * old);
+
     spin[static_cast<size_t>(site)] = value;
 }
 
 double BlumeCapelModel::energy() const {
-    // Coupling term: -J Σ_{<ij>} s_i s_j.
-    // Sum over all (site, neighbor) pairs — each bond counted twice — then halve.
-    int coupling_sum = 0;
-    for (int i = 0; i < N; ++i) {
-        int si = spin[static_cast<size_t>(i)];
-        for (int d = 0; d < 4; ++d) {
-            int j = nbr[static_cast<size_t>(i * 4 + d)];
-            coupling_sum += si * spin[static_cast<size_t>(j)];
-        }
-    }
-    double coupling = -coupling_sum / 2.0;
-
-    // Crystal-field term: D Σ_i s_i².
-    int sq_sum = 0;
-    for (int i = 0; i < N; ++i) {
-        int si = spin[static_cast<size_t>(i)];
-        sq_sum += si * si;
-    }
-    double crystal = D_ * sq_sum;
-
-    return coupling + crystal;
+    return cached_energy_;
 }
 
 double BlumeCapelModel::magnetization() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += spin[static_cast<size_t>(i)];
-    }
-    return static_cast<double>(sum) / N;
+    return static_cast<double>(cached_m_sum_) / N;
 }
 
 double BlumeCapelModel::abs_magnetization() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += spin[static_cast<size_t>(i)];
-    }
-    return std::abs(static_cast<double>(sum)) / N;
+    return std::abs(static_cast<double>(cached_m_sum_)) / N;
 }
 
 double BlumeCapelModel::quadrupole() const {
-    int sq_sum = 0;
-    for (int i = 0; i < N; ++i) {
-        int si = spin[static_cast<size_t>(i)];
-        sq_sum += si * si;
-    }
-    return static_cast<double>(sq_sum) / N;
+    return static_cast<double>(cached_sq_sum_) / N;
 }
 
 int BlumeCapelModel::_wolff_step() {
@@ -132,13 +110,27 @@ int BlumeCapelModel::_wolff_step() {
         }
     }
 
-    // Flip every spin in the cluster: s → -s
+    // Flip cluster and update cache.
+    // Energy: only boundary bonds change (same as Ising).
+    // Crystal field: (-s)² = s², so D term is unchanged.
+    // Quadrupole: unchanged for same reason.
+    // Magnetization: all cluster spins were seed_spin, now -seed_spin.
+    int delta_energy = 0;
     for (int i = 0; i < N; ++i) {
-        if (in_cluster[static_cast<size_t>(i)]) {
-            spin[static_cast<size_t>(i)] =
-                static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
+        if (!in_cluster[static_cast<size_t>(i)]) continue;
+        for (int d = 0; d < 4; ++d) {
+            int j = nbr[static_cast<size_t>(i * 4 + d)];
+            if (!in_cluster[static_cast<size_t>(j)]) {
+                delta_energy += 2 * spin[static_cast<size_t>(i)]
+                                  * spin[static_cast<size_t>(j)];
+            }
         }
+        spin[static_cast<size_t>(i)] =
+            static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
     }
+    cached_energy_ += delta_energy;
+    cached_m_sum_ -= 2 * seed_spin * cluster_size;
+    // cached_sq_sum_ unchanged: (-s)² = s²
 
     return cluster_size;
 }
@@ -182,6 +174,9 @@ int BlumeCapelModel::_metropolis_sweep() {
 
         // Accept if ΔE ≤ 0, otherwise with probability exp(-ΔE/T)
         if (dE <= 0.0 || rng.uniform() < std::exp(-dE / T_)) {
+            cached_energy_ += dE;
+            cached_m_sum_ += (new_spin - old_spin);
+            cached_sq_sum_ += (new_spin * new_spin - old_spin * old_spin);
             spin[static_cast<size_t>(site)] = new_spin;
             ++accepted;
         }

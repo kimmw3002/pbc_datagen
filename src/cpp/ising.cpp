@@ -14,7 +14,9 @@ IsingModel::IsingModel(int L, uint64_t seed)
       T_(0.0),
       spin(static_cast<size_t>(L * L), int8_t{1}),   // cold start: all +1
       nbr(make_neighbor_table(L)),
-      rng(seed) {}
+      rng(seed),
+      cached_energy_(-2 * L * L),    // all aligned: each of 2N bonds contributes -1
+      cached_m_sum_(L * L) {}        // all +1: sum = N
 
 void IsingModel::set_temperature(double T) {
     if (T <= 0.0) {
@@ -30,37 +32,29 @@ void IsingModel::set_spin(int site, int8_t value) {
     if (value != 1 && value != -1) {
         throw std::invalid_argument("spin value must be +1 or -1");
     }
+    int8_t old = spin[static_cast<size_t>(site)];
+    if (old == value) return;
+
+    // Update cached energy: ΔE = _delta_energy gives the change for
+    // flipping old → -old.  But set_spin sets to an arbitrary value.
+    // For Ising (±1 only), if old != value then value == -old, so
+    // this IS a flip and _delta_energy applies directly.
+    cached_energy_ += _delta_energy(site);
+    cached_m_sum_ += (value - old);
+
     spin[static_cast<size_t>(site)] = value;
 }
 
 int IsingModel::energy() const {
-    // Sum s_i * s_j over all (site, neighbor) pairs.  Each bond is
-    // counted twice (once from each end), so divide by 2.
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        int si = spin[static_cast<size_t>(i)];
-        for (int d = 0; d < 4; ++d) {
-            int j = nbr[static_cast<size_t>(i * 4 + d)];
-            sum += si * spin[static_cast<size_t>(j)];
-        }
-    }
-    return -sum / 2;   // H = -J Σ_{<ij>} s_i s_j
+    return cached_energy_;
 }
 
 double IsingModel::magnetization() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += spin[static_cast<size_t>(i)];
-    }
-    return static_cast<double>(sum) / N;
+    return static_cast<double>(cached_m_sum_) / N;
 }
 
 double IsingModel::abs_magnetization() const {
-    int sum = 0;
-    for (int i = 0; i < N; ++i) {
-        sum += spin[static_cast<size_t>(i)];
-    }
-    return std::abs(static_cast<double>(sum)) / N;
+    return std::abs(static_cast<double>(cached_m_sum_)) / N;
 }
 
 int IsingModel::_delta_energy(int site) const {
@@ -95,6 +89,8 @@ int IsingModel::_metropolis_sweep() {
 
         // Accept if ΔE ≤ 0, otherwise accept with probability exp(-ΔE/T)
         if (dE <= 0 || rng.uniform() < exp_table[dE / 4]) {
+            cached_energy_ += dE;
+            cached_m_sum_ -= 2 * spin[static_cast<size_t>(site)];
             spin[static_cast<size_t>(site)] =
                 static_cast<int8_t>(-spin[static_cast<size_t>(site)]);
             ++accepted;
@@ -140,12 +136,29 @@ int IsingModel::_wolff_step() {
         }
     }
 
-    // Flip every spin in the cluster
+    // Flip the cluster and update cached observables.
+    //
+    // Energy: only boundary bonds (cluster ↔ non-cluster) change.
+    // Each such bond (i,j) contributes -s_i*s_j to H.  After flipping
+    // site i, the bond becomes -(-s_i)*s_j = +s_i*s_j.  Net change
+    // per boundary bond = 2*s_i*s_j.  Interior bonds (both flip) cancel.
+    int delta_energy = 0;
     for (int i = 0; i < N; ++i) {
-        if (in_cluster[static_cast<size_t>(i)]) {
-            spin[static_cast<size_t>(i)] = static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
+        if (!in_cluster[static_cast<size_t>(i)]) continue;
+        for (int d = 0; d < 4; ++d) {
+            int j = nbr[static_cast<size_t>(i * 4 + d)];
+            if (!in_cluster[static_cast<size_t>(j)]) {
+                delta_energy += 2 * spin[static_cast<size_t>(i)]
+                                  * spin[static_cast<size_t>(j)];
+            }
         }
+        spin[static_cast<size_t>(i)] =
+            static_cast<int8_t>(-spin[static_cast<size_t>(i)]);
     }
+    cached_energy_ += delta_energy;
+
+    // Magnetization: all cluster spins were seed_spin, now -seed_spin.
+    cached_m_sum_ -= 2 * seed_spin * cluster_size;
 
     return cluster_size;
 }
