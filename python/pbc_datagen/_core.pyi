@@ -89,6 +89,22 @@ class AshkinTellerModel:
 
 def pt_exchange(E_i: float, E_j: float, T_i: float, T_j: float, rng: Rng) -> bool: ...
 
+LABEL_NONE: int
+LABEL_UP: int
+LABEL_DOWN: int
+
+def pt_update_labels(labels: list[int], t2r: list[int], M: int) -> None: ...
+def pt_accumulate_histograms(
+    n_up: list[int],
+    n_down: list[int],
+    labels: list[int],
+    t2r: list[int],
+    M: int,
+) -> None: ...
+def pt_count_round_trips(
+    labels: list[int], prev_labels: list[int], t2r: list[int], M: int
+) -> int: ...
+
 # --- PT engine: templated per-model ------------------------------------------
 
 def pt_exchange_round_ising(

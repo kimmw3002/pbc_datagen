@@ -77,4 +77,55 @@ void pt_exchange_round(
     }
 }
 
+// ── Label constants ────────────────────────────────────────────────
+constexpr int LABEL_NONE = 0;
+constexpr int LABEL_UP   = 1;   // last visited T_min (cold end)
+constexpr int LABEL_DOWN = -1;  // last visited T_max (hot end)
+
+// ── 1.5.3  pt_update_labels ───────────────────────────────────────
+// Assign directional labels at the temperature extremes.
+// Replica at coldest slot (0) → UP, replica at hottest slot (M-1) → DOWN.
+// All other labels unchanged.
+inline void pt_update_labels(
+    std::vector<int>& labels,
+    const std::vector<int>& t2r,
+    int M)
+{
+    labels[t2r[0]]     = LABEL_UP;
+    labels[t2r[M - 1]] = LABEL_DOWN;
+}
+
+// ── 1.5.4  pt_accumulate_histograms ───────────────────────────────
+// For each T slot, increment n_up or n_down based on the directional
+// label of the replica currently sitting there.  Skip LABEL_NONE.
+inline void pt_accumulate_histograms(
+    std::vector<int>& n_up,
+    std::vector<int>& n_down,
+    const std::vector<int>& labels,
+    const std::vector<int>& t2r,
+    int M)
+{
+    for (int t = 0; t < M; ++t) {
+        int lbl = labels[t2r[t]];
+        if (lbl == LABEL_UP)        ++n_up[t];
+        else if (lbl == LABEL_DOWN) ++n_down[t];
+    }
+}
+
+// ── 1.5.5  pt_count_round_trips ───────────────────────────────────
+// A round trip completes when an UP-labeled replica reaches the hot end
+// (slot M-1) and gets relabeled DOWN.  Check the replica at slot M-1:
+// if prev was UP and curr is DOWN, that's one completed trip.
+inline int pt_count_round_trips(
+    const std::vector<int>& labels,
+    const std::vector<int>& prev_labels,
+    const std::vector<int>& t2r,
+    int M)
+{
+    int r = t2r[M - 1];
+    if (prev_labels[r] == LABEL_UP && labels[r] == LABEL_DOWN)
+        return 1;
+    return 0;
+}
+
 }  // namespace pbc

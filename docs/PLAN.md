@@ -228,9 +228,9 @@ m.def("pt_rounds_ising", ...);
 
 - [x] Step 1.5.1: `pt_exchange()` — pure accept/reject function + pybind11 binding + tests
 - [x] Step 1.5.2: `pt_exchange_round()` — M random gap proposals + map updates + binding + tests
-- [ ] Step 1.5.3: `pt_update_labels()` — label assignment at extremes + binding + tests
-- [ ] Step 1.5.4: `pt_accumulate_histograms()` — diffusion counter increments + binding + tests
-- [ ] Step 1.5.5: `pt_count_round_trips()` — round-trip detection + binding + tests
+- [x] Step 1.5.3: `pt_update_labels()` — label assignment at extremes + binding + tests
+- [x] Step 1.5.4: `pt_accumulate_histograms()` — diffusion counter increments + binding + tests
+- [x] Step 1.5.5: `pt_count_round_trips()` — round-trip detection + binding + tests
 - [ ] Step 1.5.6: `pt_collect_obs()` — per-T-slot energy recording + binding + tests
 - [ ] Step 1.5.7: `pt_rounds()` — thin composition loop + binding + integration test
 - [ ] Step 1.5.8: Update `_core.pyi` type stubs for all new functions
@@ -840,12 +840,12 @@ python scripts/generate_dataset.py \
 - [x] Unit: On accepted swap, r2t and t2r stay inverse permutations
 - [x] Unit: Same T → n_accepts == n_attempts at every gap
 
-#### `tests/test_pt_labels.py` — labels, histograms, round trips (Steps 1.5.3–1.5.5)
-- [ ] Unit: `pt_update_labels` sets UP at slot 0, DOWN at slot M-1, others unchanged
-- [ ] Unit: `pt_accumulate_histograms` increments n_up/n_down matching replica labels
-- [ ] Unit: `pt_accumulate_histograms` skips LABEL_NONE slots
-- [ ] Unit: `pt_count_round_trips` detects UP→DOWN transition at slot M-1
-- [ ] Unit: `pt_count_round_trips` returns 0 when no transition occurs
+#### `tests/test_pt_labels.py` — labels, histograms, round trips (Steps 1.5.3–1.5.5) ✅
+- [x] Unit: `pt_update_labels` sets UP at slot 0, DOWN at slot M-1, others unchanged
+- [x] Unit: `pt_accumulate_histograms` increments n_up/n_down matching replica labels
+- [x] Unit: `pt_accumulate_histograms` skips LABEL_NONE slots
+- [x] Unit: `pt_count_round_trips` detects UP→DOWN transition at slot M-1
+- [x] Unit: `pt_count_round_trips` returns 0 when no transition occurs
 
 #### `tests/test_pt_rounds.py` — composition loop integration (Steps 1.5.6–1.5.7)
 - [ ] Unit: `pt_collect_obs` records valid energies per T slot per round

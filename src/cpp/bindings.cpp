@@ -206,28 +206,62 @@ PYBIND11_MODULE(_core, m) {
           "Single-gap Metropolis exchange decision.\n"
           "Returns True (accept) or False (reject).");
 
-    // --- PT engine: templated per-model ------------------------------------
-    //
     // pybind11's automatic STL conversion copies Python lists into temporary
     // C++ vectors — mutations inside C++ would be lost.  These lambdas
     // manually copy int lists → vectors, call the C++ function, then write
     // the mutated values back into the original Python lists.
     // The vectors are tiny (M ≈ 20 ints) so the overhead is negligible.
     // In production, pt_rounds() keeps everything in C++ with no copying.
-
-    // Helper: copy py::list of ints → std::vector<int>
     auto list_to_ivec = [](py::list& lst) {
         std::vector<int> v(lst.size());
         for (size_t i = 0; i < lst.size(); ++i)
             v[i] = lst[i].cast<int>();
         return v;
     };
-    // Helper: write std::vector<int> back into py::list
     auto ivec_to_list = [](const std::vector<int>& v, py::list& lst) {
         for (size_t i = 0; i < v.size(); ++i)
             lst[i] = v[i];
     };
 
+    m.attr("LABEL_NONE") = pbc::LABEL_NONE;
+    m.attr("LABEL_UP")   = pbc::LABEL_UP;
+    m.attr("LABEL_DOWN") = pbc::LABEL_DOWN;
+
+    m.def("pt_update_labels",
+        [list_to_ivec, ivec_to_list](py::list py_labels, py::list py_t2r, int M) {
+            auto labels = list_to_ivec(py_labels);
+            auto t2r    = list_to_ivec(py_t2r);
+            pbc::pt_update_labels(labels, t2r, M);
+            ivec_to_list(labels, py_labels);
+        },
+        py::arg("labels"), py::arg("t2r"), py::arg("M"));
+
+    m.def("pt_accumulate_histograms",
+        [list_to_ivec, ivec_to_list](
+            py::list py_n_up, py::list py_n_down,
+            py::list py_labels, py::list py_t2r, int M) {
+            auto n_up   = list_to_ivec(py_n_up);
+            auto n_down = list_to_ivec(py_n_down);
+            auto labels = list_to_ivec(py_labels);
+            auto t2r    = list_to_ivec(py_t2r);
+            pbc::pt_accumulate_histograms(n_up, n_down, labels, t2r, M);
+            ivec_to_list(n_up, py_n_up);
+            ivec_to_list(n_down, py_n_down);
+        },
+        py::arg("n_up"), py::arg("n_down"),
+        py::arg("labels"), py::arg("t2r"), py::arg("M"));
+
+    m.def("pt_count_round_trips",
+        [list_to_ivec](py::list py_labels, py::list py_prev, py::list py_t2r, int M) {
+            auto labels = list_to_ivec(py_labels);
+            auto prev   = list_to_ivec(py_prev);
+            auto t2r    = list_to_ivec(py_t2r);
+            return pbc::pt_count_round_trips(labels, prev, t2r, M);
+        },
+        py::arg("labels"), py::arg("prev_labels"),
+        py::arg("t2r"), py::arg("M"));
+
+    // --- PT engine: templated per-model ------------------------------------
     m.def("pt_exchange_round_ising",
         [list_to_ivec, ivec_to_list](
            py::list py_replicas,
