@@ -84,3 +84,37 @@ class AshkinTellerModel:
     def _metropolis_sweep(self) -> int: ...
     def _wolff_step(self) -> int: ...
     def sweep(self, n_sweeps: int) -> dict[str, npt.NDArray[np.float64]]: ...
+
+# --- PT engine: non-templated ------------------------------------------------
+
+def pt_exchange(E_i: float, E_j: float, T_i: float, T_j: float, rng: Rng) -> bool: ...
+
+# --- PT engine: templated per-model ------------------------------------------
+
+def pt_exchange_round_ising(
+    replicas: list[IsingModel],
+    temps: list[float],
+    r2t: list[int],
+    t2r: list[int],
+    n_accepts: list[int],
+    n_attempts: list[int],
+    rng: Rng,
+) -> None: ...
+def pt_exchange_round_bc(
+    replicas: list[BlumeCapelModel],
+    temps: list[float],
+    r2t: list[int],
+    t2r: list[int],
+    n_accepts: list[int],
+    n_attempts: list[int],
+    rng: Rng,
+) -> None: ...
+def pt_exchange_round_at(
+    replicas: list[AshkinTellerModel],
+    temps: list[float],
+    r2t: list[int],
+    t2r: list[int],
+    n_accepts: list[int],
+    n_attempts: list[int],
+    rng: Rng,
+) -> None: ...

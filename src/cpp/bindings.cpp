@@ -2,12 +2,14 @@
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include "ashkin_teller.hpp"
 #include "blume_capel.hpp"
 #include "ising.hpp"
 #include "lattice.hpp"
 #include "prng.hpp"
+#include "pt_engine.hpp"
 
 namespace py = pybind11;
 
@@ -195,4 +197,118 @@ PYBIND11_MODULE(_core, m) {
             out["abs_m_baxter"] = std::move(abs_m_baxter);
             return out;
         }, py::arg("n_sweeps"));
+
+    // --- PT engine: non-templated functions --------------------------------
+    m.def("pt_exchange", &pbc::pt_exchange,
+          py::arg("E_i"), py::arg("E_j"),
+          py::arg("T_i"), py::arg("T_j"),
+          py::arg("rng"),
+          "Single-gap Metropolis exchange decision.\n"
+          "Returns True (accept) or False (reject).");
+
+    // --- PT engine: templated per-model ------------------------------------
+    //
+    // pybind11's automatic STL conversion copies Python lists into temporary
+    // C++ vectors — mutations inside C++ would be lost.  These lambdas
+    // manually copy int lists → vectors, call the C++ function, then write
+    // the mutated values back into the original Python lists.
+    // The vectors are tiny (M ≈ 20 ints) so the overhead is negligible.
+    // In production, pt_rounds() keeps everything in C++ with no copying.
+
+    // Helper: copy py::list of ints → std::vector<int>
+    auto list_to_ivec = [](py::list& lst) {
+        std::vector<int> v(lst.size());
+        for (size_t i = 0; i < lst.size(); ++i)
+            v[i] = lst[i].cast<int>();
+        return v;
+    };
+    // Helper: write std::vector<int> back into py::list
+    auto ivec_to_list = [](const std::vector<int>& v, py::list& lst) {
+        for (size_t i = 0; i < v.size(); ++i)
+            lst[i] = v[i];
+    };
+
+    m.def("pt_exchange_round_ising",
+        [list_to_ivec, ivec_to_list](
+           py::list py_replicas,
+           std::vector<double> temps,
+           py::list py_r2t, py::list py_t2r,
+           py::list py_acc, py::list py_att,
+           pbc::Rng& rng) {
+            // Extract model pointers
+            std::vector<pbc::IsingModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::IsingModel*>());
+            // Copy mutable int lists
+            auto r2t = list_to_ivec(py_r2t);
+            auto t2r = list_to_ivec(py_t2r);
+            auto acc = list_to_ivec(py_acc);
+            auto att = list_to_ivec(py_att);
+
+            pbc::pt_exchange_round(reps, temps, r2t, t2r, acc, att, rng);
+
+            // Write mutations back
+            ivec_to_list(r2t, py_r2t);
+            ivec_to_list(t2r, py_t2r);
+            ivec_to_list(acc, py_acc);
+            ivec_to_list(att, py_att);
+        },
+        py::arg("replicas"), py::arg("temps"),
+        py::arg("r2t"), py::arg("t2r"),
+        py::arg("n_accepts"), py::arg("n_attempts"),
+        py::arg("rng"));
+
+    m.def("pt_exchange_round_bc",
+        [list_to_ivec, ivec_to_list](
+           py::list py_replicas,
+           std::vector<double> temps,
+           py::list py_r2t, py::list py_t2r,
+           py::list py_acc, py::list py_att,
+           pbc::Rng& rng) {
+            std::vector<pbc::BlumeCapelModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::BlumeCapelModel*>());
+            auto r2t = list_to_ivec(py_r2t);
+            auto t2r = list_to_ivec(py_t2r);
+            auto acc = list_to_ivec(py_acc);
+            auto att = list_to_ivec(py_att);
+
+            pbc::pt_exchange_round(reps, temps, r2t, t2r, acc, att, rng);
+
+            ivec_to_list(r2t, py_r2t);
+            ivec_to_list(t2r, py_t2r);
+            ivec_to_list(acc, py_acc);
+            ivec_to_list(att, py_att);
+        },
+        py::arg("replicas"), py::arg("temps"),
+        py::arg("r2t"), py::arg("t2r"),
+        py::arg("n_accepts"), py::arg("n_attempts"),
+        py::arg("rng"));
+
+    m.def("pt_exchange_round_at",
+        [list_to_ivec, ivec_to_list](
+           py::list py_replicas,
+           std::vector<double> temps,
+           py::list py_r2t, py::list py_t2r,
+           py::list py_acc, py::list py_att,
+           pbc::Rng& rng) {
+            std::vector<pbc::AshkinTellerModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::AshkinTellerModel*>());
+            auto r2t = list_to_ivec(py_r2t);
+            auto t2r = list_to_ivec(py_t2r);
+            auto acc = list_to_ivec(py_acc);
+            auto att = list_to_ivec(py_att);
+
+            pbc::pt_exchange_round(reps, temps, r2t, t2r, acc, att, rng);
+
+            ivec_to_list(r2t, py_r2t);
+            ivec_to_list(t2r, py_t2r);
+            ivec_to_list(acc, py_acc);
+            ivec_to_list(att, py_att);
+        },
+        py::arg("replicas"), py::arg("temps"),
+        py::arg("r2t"), py::arg("t2r"),
+        py::arg("n_accepts"), py::arg("n_attempts"),
+        py::arg("rng"));
 }
