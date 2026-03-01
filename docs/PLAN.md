@@ -221,13 +221,15 @@ python/pbc_datagen/
 
 ---
 
-### 2.0 Autocorrelation Utility
+### 2.0 Autocorrelation Utility ✅
 
 File: `python/pbc_datagen/autocorrelation.py`
 
-- [ ] Step 2.0.1: `acf_fft(x)` — FFT-based normalized autocorrelation function
-- [ ] Step 2.0.2: `tau_int(x)` — integrated autocorrelation time via first zero crossing
-- [ ] Step 2.0.3: `tau_int_multi(sweep_dict)` — τ_int for every key in a `sweep()` result dict; returns per-observable τ_int values and the bottleneck τ_max
+- [x] Step 2.0.1: `acf_fft(x)` — FFT-based normalized autocorrelation function
+- [x] Step 2.0.2: `tau_int(x)` — integrated autocorrelation time via first zero crossing
+- [x] Step 2.0.3: `tau_int_multi(sweep_dict)` — τ_int for every key in a `sweep()` result dict; returns per-observable τ_int values and the bottleneck τ_max
+
+Tests: `tests/test_autocorrelation.py` — 7 tests: ACF on white noise + AR(1), zero-variance guard, τ_int recovery on AR(1) at two correlation strengths (φ=0.5, φ=0.9), multi-observable bottleneck rule.
 
 #### ACF Math
 
@@ -661,12 +663,15 @@ python scripts/generate_dataset.py \
 - [x] Unit: AT sweep — detailed balance + ergodicity, observables dict has 7 keys — `test_sweep.py`
 - [x] Unit: AT sweep with U > 1 — remapped cluster produces correct equilibrium statistics — `test_sweep.py`
 
-### Phase 2 Tests — Autocorrelation (`tests/test_autocorrelation.py`)
+### Phase 2 Tests — Autocorrelation (`tests/test_autocorrelation.py`) ✅
 
-- [ ] Unit: `acf_fft` on synthetic AR(1) signal matches known analytical ACF
-- [ ] Unit: `tau_int` on AR(1) with known τ recovers correct value within tolerance
-- [ ] Unit: `tau_int` on white noise returns ≈ 0.5
-- [ ] Unit: `tau_int_multi` returns per-observable dict and correct bottleneck τ_max
+- [x] Unit: `acf_fft` on white noise — ρ(0)=1, ρ(t>0) within ±3/√N
+- [x] Unit: `acf_fft` on synthetic AR(1) signal matches known analytical ACF (φ^t)
+- [x] Unit: `acf_fft` on constant input raises ValueError (zero variance guard)
+- [x] Unit: `tau_int` on white noise returns ≈ 0.5
+- [x] Unit: `tau_int` on AR(1) with φ=0.5 recovers τ=1.5 within 15%
+- [x] Unit: `tau_int` on AR(1) with φ=0.9 recovers τ=9.5 within 20%
+- [x] Unit: `tau_int_multi` returns per-observable dict and correct bottleneck τ_max
 
 ### Phase 1.5 Tests — C++ PT Inner Loop
 
