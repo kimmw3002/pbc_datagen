@@ -67,6 +67,12 @@ PYBIND11_MODULE(_core, m) {
         .def("_wolff_step", &pbc::IsingModel::_wolff_step)
         .def("_delta_energy", &pbc::IsingModel::_delta_energy, py::arg("site"))
         .def("_metropolis_sweep", &pbc::IsingModel::_metropolis_sweep)
+        .def("observables", [](const pbc::IsingModel& self) {
+            py::dict out;
+            for (auto& [name, val] : self.observables())
+                out[py::cast(name)] = val;
+            return out;
+        })
         .def("sweep", [](pbc::IsingModel& self, int n_sweeps) {
             auto result = self.sweep(n_sweeps);
             auto n = static_cast<py::ssize_t>(n_sweeps);
@@ -112,6 +118,12 @@ PYBIND11_MODULE(_core, m) {
         .def("_delta_energy", &pbc::BlumeCapelModel::_delta_energy,
              py::arg("site"), py::arg("new_spin"))
         .def("_metropolis_sweep", &pbc::BlumeCapelModel::_metropolis_sweep)
+        .def("observables", [](const pbc::BlumeCapelModel& self) {
+            py::dict out;
+            for (auto& [name, val] : self.observables())
+                out[py::cast(name)] = val;
+            return out;
+        })
         .def("sweep", [](pbc::BlumeCapelModel& self, int n_sweeps) {
             auto result = self.sweep(n_sweeps);
             auto n = static_cast<py::ssize_t>(n_sweeps);
@@ -175,6 +187,12 @@ PYBIND11_MODULE(_core, m) {
              py::arg("site"))
         .def("_metropolis_sweep", &pbc::AshkinTellerModel::_metropolis_sweep)
         .def("_wolff_step", &pbc::AshkinTellerModel::_wolff_step)
+        .def("observables", [](const pbc::AshkinTellerModel& self) {
+            py::dict out;
+            for (auto& [name, val] : self.observables())
+                out[py::cast(name)] = val;
+            return out;
+        })
         .def("sweep", [](pbc::AshkinTellerModel& self, int n_sweeps) {
             auto result = self.sweep(n_sweeps);
             auto n = static_cast<py::ssize_t>(n_sweeps);

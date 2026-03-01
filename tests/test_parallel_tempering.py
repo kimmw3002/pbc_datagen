@@ -1,4 +1,4 @@
-"""Tests for PT orchestration — Phase A ladder tuning (KTH feedback)."""
+"""Tests for PT orchestration — Phase A/B ladder tuning & equilibration."""
 
 from __future__ import annotations
 
@@ -165,3 +165,126 @@ class TestTuneLadder:
         )
         with pytest.raises(RuntimeError, match="(acceptance rate|converge)"):
             engine.tune_ladder(max_iterations=10)
+
+
+# ---------------------------------------------------------------------------
+# Phase B: Welch equilibration check — pure function, synthetic obs_streams
+# ---------------------------------------------------------------------------
+
+
+class TestWelchEquilibrationCheck:
+    """Test the Welch t-test equilibration check.
+
+    welch_equilibration_check(obs_streams, alpha) takes the obs_streams
+    dict from PTResult (obs_streams[name][T_slot] = list of values)
+    and returns True if all observables at all T slots pass the
+    Welch t-test (first 20% vs last 20%), Bonferroni-corrected.
+    """
+
+    def test_stationary_passes(self) -> None:
+        """IID Gaussian streams should pass — no drift."""
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        rng = np.random.default_rng(42)
+        M = 5  # temperature slots
+        N = 10_000  # samples per slot
+        # obs_streams format: dict[str, list[list[float]]]
+        obs_streams: dict[str, list[list[float]]] = {
+            "energy": [rng.normal(0, 1, N).tolist() for _ in range(M)],
+            "abs_m": [rng.normal(0.5, 0.1, N).tolist() for _ in range(M)],
+        }
+
+        assert welch_equilibration_check(obs_streams)
+
+    def test_drifting_fails(self) -> None:
+        """A strong linear drift should fail — means are clearly different."""
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        rng = np.random.default_rng(42)
+        M = 5
+        N = 10_000
+        obs_streams: dict[str, list[list[float]]] = {}
+        # Stationary observable — passes on its own
+        obs_streams["energy"] = [rng.normal(0, 1, N).tolist() for _ in range(M)]
+        # Drifting observable at slot 0 — first 20% mean ≠ last 20% mean
+        drifting = np.linspace(-5, 5, N) + rng.normal(0, 0.1, N)
+        slots = [rng.normal(0, 1, N).tolist() for _ in range(M)]
+        slots[0] = drifting.tolist()
+        obs_streams["abs_m"] = slots
+
+        assert not welch_equilibration_check(obs_streams)
+
+    def test_bonferroni_correction(self) -> None:
+        """With many T slots × observables, threshold tightens.
+
+        A marginal difference that would fail at α=0.05 might pass
+        after Bonferroni correction with many tests.
+        """
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        rng = np.random.default_rng(123)
+        M = 20  # many slots
+        N = 10_000
+        # All stationary — with 20 slots × 1 obs = 20 tests,
+        # Bonferroni α = 0.05/20 = 0.0025. Should still pass.
+        obs_streams: dict[str, list[list[float]]] = {
+            "energy": [rng.normal(0, 1, N).tolist() for _ in range(M)],
+        }
+
+        assert welch_equilibration_check(obs_streams)
+
+
+# ---------------------------------------------------------------------------
+# Phase B: equilibrate() integration
+# ---------------------------------------------------------------------------
+
+
+class TestEquilibrate:
+    """Integration tests for Phase B equilibration."""
+
+    def test_requires_locked_ladder(self) -> None:
+        """Cannot equilibrate before tuning — ladder must be locked."""
+        engine = PTEngine(
+            model_type="ising",
+            L=4,
+            param_value=0.0,
+            T_range=(1.5, 4.0),
+            n_replicas=5,
+            seed=42,
+        )
+        assert not engine.ladder_locked
+        with pytest.raises(RuntimeError, match="locked"):
+            engine.equilibrate()
+
+    def test_equilibrate_sets_tau_max(self) -> None:
+        """After A→B, tau_max is a positive float."""
+        engine = PTEngine(
+            model_type="ising",
+            L=4,
+            param_value=0.0,
+            T_range=(1.5, 4.0),
+            n_replicas=5,
+            seed=12345,
+        )
+        engine.tune_ladder()
+        engine.equilibrate()
+
+        assert engine.tau_max is not None
+        assert engine.tau_max > 0
+
+    def test_temps_unchanged_after_equilibrate(self) -> None:
+        """Ladder must be immutable during Phase B."""
+        engine = PTEngine(
+            model_type="ising",
+            L=4,
+            param_value=0.0,
+            T_range=(1.5, 4.0),
+            n_replicas=5,
+            seed=12345,
+        )
+        engine.tune_ladder()
+        temps_before = engine.temps.copy()
+
+        engine.equilibrate()
+
+        np.testing.assert_array_equal(engine.temps, temps_before)

@@ -14,8 +14,10 @@ from typing import Union
 
 import numpy as np
 import numpy.typing as npt
+from scipy import stats
 
 import pbc_datagen._core as _core
+from pbc_datagen.autocorrelation import tau_int_multi
 
 # Union of all model types — mypy needs this to see set_temperature etc.
 Model = Union[_core.IsingModel, _core.BlumeCapelModel, _core.AshkinTellerModel]
@@ -131,6 +133,53 @@ def kth_check_convergence(
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
 
     return bool(r2 >= r2_threshold)
+
+
+def welch_equilibration_check(
+    obs_streams: dict[str, list[list[float]]],
+    alpha: float = 0.05,
+) -> bool:
+    """Check equilibration via Welch's t-test on observable streams.
+
+    For every observable at every temperature slot, compare the first 20%
+    of samples against the last 20%.  If the means differ significantly,
+    the system hasn't equilibrated yet.
+
+    Uses Bonferroni correction: the per-test threshold is
+    α / (n_observables × n_T_slots) to control family-wise error rate.
+
+    Args:
+        obs_streams: PTResult obs_streams — obs_streams[name][T_slot]
+            is a list of float values (one per PT round).
+        alpha: Family-wise significance level (default 0.05).
+
+    Returns:
+        True if ALL tests pass (equilibrated), False if any fails.
+    """
+    if not obs_streams:
+        return True
+
+    # Count total number of tests for Bonferroni correction
+    obs_names = list(obs_streams.keys())
+    M = len(obs_streams[obs_names[0]])  # number of T slots
+    n_tests = len(obs_names) * M
+    threshold = alpha / n_tests
+
+    for name in obs_names:
+        for t in range(M):
+            series = obs_streams[name][t]
+            n = len(series)
+            if n < 10:
+                # Too few samples to test meaningfully
+                return False
+            cut = n // 5  # 20%
+            first = series[:cut]
+            last = series[-cut:]
+            _, p_value = stats.ttest_ind(first, last, equal_var=False)
+            if p_value < threshold:
+                return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -348,3 +397,73 @@ class PTEngine:
             raise RuntimeError(msg)
 
         self.ladder_locked = True
+
+    def equilibrate(
+        self,
+        n_initial: int = 100_000,
+        n_max: int = 6_400_000,
+        alpha: float = 0.05,
+    ) -> None:
+        """Phase B: equilibrate on the locked ladder, then measure τ_int.
+
+        Doubling scheme: run n_initial rounds with observable tracking,
+        check equilibration via Welch t-test.  If any test fails, double n
+        and retry.  Cap at n_max.
+
+        Once equilibrated, measure τ_int on the last converged batch
+        (excluding first 20% as burn-in) and lock τ_max.
+
+        Raises:
+            RuntimeError: If ladder is not locked (must call tune_ladder first).
+            RuntimeError: If equilibration fails after reaching n_max.
+        """
+        if not self.ladder_locked:
+            msg = "Ladder must be locked before equilibration — call tune_ladder() first"
+            raise RuntimeError(msg)
+
+        M = self.n_replicas
+        n_rounds = n_initial
+
+        while n_rounds <= n_max:
+            # Set replica temperatures
+            for r in range(M):
+                self.replicas[r].set_temperature(self.temps[self.r2t[r]])
+
+            # Run PT rounds with observable tracking
+            result: _core.PTResult = self._pt_rounds(  # type: ignore[operator]
+                self.replicas,
+                self.temps.tolist(),
+                self.r2t,
+                self.t2r,
+                self.labels,
+                n_rounds,
+                self.rng,
+                True,  # track observables
+            )
+
+            obs_streams: dict[str, list[list[float]]] = result["obs_streams"]
+
+            # Welch t-test equilibration check
+            if welch_equilibration_check(obs_streams, alpha=alpha):
+                # Equilibrated — measure τ_int on last 80% (discard first 20% burn-in)
+                burn_in = n_rounds // 5
+                trimmed: dict[str, npt.NDArray[np.float64]] = {}
+                for name, slots in obs_streams.items():
+                    # Use all T slots — tau_int_multi takes per-observable arrays,
+                    # so we pick the bottleneck across all slots
+                    for t in range(M):
+                        key = f"{name}_T{t}"
+                        trimmed[key] = np.array(slots[t][burn_in:], dtype=np.float64)
+
+                _, self.tau_max = tau_int_multi(trimmed)
+                return
+
+            # Not equilibrated — double and retry
+            n_rounds *= 2
+
+        msg = (
+            f"Equilibration failed: Welch t-test still failing after "
+            f"{n_max} rounds. System cannot equilibrate — try more "
+            f"replicas or a narrower T range."
+        )
+        raise RuntimeError(msg)
