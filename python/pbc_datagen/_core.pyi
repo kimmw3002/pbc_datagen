@@ -134,3 +134,43 @@ def pt_exchange_round_at(
     n_attempts: list[int],
     rng: Rng,
 ) -> None: ...
+
+# pt_collect_obs: test-only bindings for per-T-slot observable recording
+def pt_collect_obs_ising(
+    obs_streams: dict[str, list[list[float]]],
+    replicas: list[IsingModel],
+    t2r: list[int],
+    M: int,
+) -> None: ...
+
+# pt_rounds: composition loop returning PTResult as dict
+def pt_rounds_ising(
+    replicas: list[IsingModel],
+    temps: list[float],
+    r2t: list[int],
+    t2r: list[int],
+    labels: list[int],
+    n_rounds: int,
+    rng: Rng,
+    track_observables: bool,
+) -> dict[str, object]: ...
+def pt_rounds_bc(
+    replicas: list[BlumeCapelModel],
+    temps: list[float],
+    r2t: list[int],
+    t2r: list[int],
+    labels: list[int],
+    n_rounds: int,
+    rng: Rng,
+    track_observables: bool,
+) -> dict[str, object]: ...
+def pt_rounds_at(
+    replicas: list[AshkinTellerModel],
+    temps: list[float],
+    r2t: list[int],
+    t2r: list[int],
+    labels: list[int],
+    n_rounds: int,
+    rng: Rng,
+    track_observables: bool,
+) -> dict[str, object]: ...

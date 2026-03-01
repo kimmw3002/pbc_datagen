@@ -15,6 +15,8 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace pbc {
@@ -68,6 +70,10 @@ struct BlumeCapelModel {
     // Quadrupole order parameter:  Q = (1/N) Σ_i s_i².
     // Q = 1 when all sites are magnetic (±1), Q = 0 when all vacant.
     double quadrupole() const;
+
+    // All observables as name-value pairs (for generic PT collection).
+    using ObsVec = std::vector<std::pair<std::string, double>>;
+    ObsVec observables() const;
 
     // Wolff single-cluster update, adapted for 3-state spins.
     //

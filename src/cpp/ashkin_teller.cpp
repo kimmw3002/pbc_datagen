@@ -438,4 +438,16 @@ AshkinTellerModel::SweepResult AshkinTellerModel::sweep(int n_sweeps) {
     return result;
 }
 
+AshkinTellerModel::ObsVec AshkinTellerModel::observables() const {
+    return {
+        {"energy",       energy()},
+        {"m_sigma",      m_sigma()},
+        {"abs_m_sigma",  abs_m_sigma()},
+        {"m_tau",        m_tau()},
+        {"abs_m_tau",    abs_m_tau()},
+        {"m_baxter",     m_baxter()},
+        {"abs_m_baxter", abs_m_baxter()},
+    };
+}
+
 }  // namespace pbc

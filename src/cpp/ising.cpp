@@ -193,4 +193,12 @@ IsingModel::SweepResult IsingModel::sweep(int n_sweeps) {
     return result;
 }
 
+IsingModel::ObsVec IsingModel::observables() const {
+    return {
+        {"energy",  static_cast<double>(energy())},
+        {"m",       magnetization()},
+        {"abs_m",   abs_magnetization()},
+    };
+}
+
 }  // namespace pbc

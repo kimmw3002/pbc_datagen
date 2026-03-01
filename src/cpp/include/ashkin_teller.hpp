@@ -15,6 +15,8 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace pbc {
@@ -86,6 +88,10 @@ struct AshkinTellerModel {
 
     // Absolute Baxter order parameter:  |m_B| = (1/N) |Σ σ_i τ_i|.
     double abs_m_baxter() const;
+
+    // All observables as name-value pairs (for generic PT collection).
+    using ObsVec = std::vector<std::pair<std::string, double>>;
+    ObsVec observables() const;
 
     // Local energy change for flipping σ_i → -σ_i (τ held fixed).
     //

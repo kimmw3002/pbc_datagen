@@ -12,6 +12,8 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace pbc {
@@ -55,6 +57,10 @@ struct IsingModel {
 
     // Intensive absolute magnetization:  |m| = (1/N) |Σ_i s_i|.
     double abs_magnetization() const;
+
+    // All observables as name-value pairs (for generic PT collection).
+    using ObsVec = std::vector<std::pair<std::string, double>>;
+    ObsVec observables() const;
 
     // Wolff single-cluster update (Wolff, 1989).
     // Grows a cluster from a random seed spin by adding aligned neighbors

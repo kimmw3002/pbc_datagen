@@ -216,4 +216,13 @@ BlumeCapelModel::SweepResult BlumeCapelModel::sweep(int n_sweeps) {
     return result;
 }
 
+BlumeCapelModel::ObsVec BlumeCapelModel::observables() const {
+    return {
+        {"energy",  energy()},
+        {"m",       magnetization()},
+        {"abs_m",   abs_magnetization()},
+        {"q",       quadrupole()},
+    };
+}
+
 }  // namespace pbc

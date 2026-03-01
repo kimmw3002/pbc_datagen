@@ -261,6 +261,30 @@ PYBIND11_MODULE(_core, m) {
         py::arg("labels"), py::arg("prev_labels"),
         py::arg("t2r"), py::arg("M"));
 
+    // Helper: convert PTResult to a Python dict
+    auto pt_result_to_dict = [](const pbc::PTResult& res) {
+        py::dict out;
+        out["r2t"]              = res.r2t;
+        out["t2r"]              = res.t2r;
+        out["labels"]           = res.labels;
+        out["n_accepts"]        = res.n_accepts;
+        out["n_attempts"]       = res.n_attempts;
+        out["n_up"]             = res.n_up;
+        out["n_down"]           = res.n_down;
+        out["round_trip_count"] = res.round_trip_count;
+        // obs_streams: map<string, vector<vector<double>>>
+        //           → dict[str, list[list[float]]]
+        py::dict streams;
+        for (auto& [name, slots] : res.obs_streams) {
+            py::list slot_list;
+            for (auto& s : slots)
+                slot_list.append(py::cast(s));
+            streams[py::cast(name)] = slot_list;
+        }
+        out["obs_streams"] = streams;
+        return out;
+    };
+
     // --- PT engine: templated per-model ------------------------------------
     m.def("pt_exchange_round_ising",
         [list_to_ivec, ivec_to_list](
@@ -345,4 +369,116 @@ PYBIND11_MODULE(_core, m) {
         py::arg("r2t"), py::arg("t2r"),
         py::arg("n_accepts"), py::arg("n_attempts"),
         py::arg("rng"));
+
+    // --- pt_collect_obs (templated, test-only bindings) ---
+    // Takes a dict[str, list[list[float]]] and appends one round of readings.
+    m.def("pt_collect_obs_ising",
+        [list_to_ivec](py::dict py_obs, py::list py_replicas,
+                        py::list py_t2r, int M) {
+            std::vector<pbc::IsingModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::IsingModel*>());
+            auto t2r = list_to_ivec(py_t2r);
+            // Convert py_obs → ObsStreams
+            pbc::ObsStreams obs;
+            for (auto& item : py_obs) {
+                auto name = item.first.cast<std::string>();
+                py::list slots = item.second.cast<py::list>();
+                obs[name].resize(M);
+                for (int t = 0; t < M; ++t) {
+                    py::list inner = slots[t].cast<py::list>();
+                    for (auto& v : inner)
+                        obs[name][t].push_back(v.cast<double>());
+                }
+            }
+            pbc::pt_collect_obs(obs, reps, t2r, M);
+            // Write back
+            for (auto& [name, slots] : obs) {
+                py::list slot_list;
+                for (auto& s : slots)
+                    slot_list.append(py::cast(s));
+                py_obs[py::cast(name)] = slot_list;
+            }
+        },
+        py::arg("obs_streams"), py::arg("replicas"),
+        py::arg("t2r"), py::arg("M"));
+
+    // --- pt_rounds (templated, one per model) ---
+    m.def("pt_rounds_ising",
+        [list_to_ivec, ivec_to_list, pt_result_to_dict](
+            py::list py_replicas, std::vector<double> temps,
+            py::list py_r2t, py::list py_t2r,
+            py::list py_labels, int n_rounds,
+            pbc::Rng& rng, bool track_obs) {
+            std::vector<pbc::IsingModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::IsingModel*>());
+            auto r2t    = list_to_ivec(py_r2t);
+            auto t2r    = list_to_ivec(py_t2r);
+            auto labels = list_to_ivec(py_labels);
+
+            auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
+                                       n_rounds, rng, track_obs);
+
+            ivec_to_list(res.r2t, py_r2t);
+            ivec_to_list(res.t2r, py_t2r);
+            ivec_to_list(res.labels, py_labels);
+            return pt_result_to_dict(res);
+        },
+        py::arg("replicas"), py::arg("temps"),
+        py::arg("r2t"), py::arg("t2r"), py::arg("labels"),
+        py::arg("n_rounds"), py::arg("rng"),
+        py::arg("track_observables"));
+
+    m.def("pt_rounds_bc",
+        [list_to_ivec, ivec_to_list, pt_result_to_dict](
+            py::list py_replicas, std::vector<double> temps,
+            py::list py_r2t, py::list py_t2r,
+            py::list py_labels, int n_rounds,
+            pbc::Rng& rng, bool track_obs) {
+            std::vector<pbc::BlumeCapelModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::BlumeCapelModel*>());
+            auto r2t    = list_to_ivec(py_r2t);
+            auto t2r    = list_to_ivec(py_t2r);
+            auto labels = list_to_ivec(py_labels);
+
+            auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
+                                       n_rounds, rng, track_obs);
+
+            ivec_to_list(res.r2t, py_r2t);
+            ivec_to_list(res.t2r, py_t2r);
+            ivec_to_list(res.labels, py_labels);
+            return pt_result_to_dict(res);
+        },
+        py::arg("replicas"), py::arg("temps"),
+        py::arg("r2t"), py::arg("t2r"), py::arg("labels"),
+        py::arg("n_rounds"), py::arg("rng"),
+        py::arg("track_observables"));
+
+    m.def("pt_rounds_at",
+        [list_to_ivec, ivec_to_list, pt_result_to_dict](
+            py::list py_replicas, std::vector<double> temps,
+            py::list py_r2t, py::list py_t2r,
+            py::list py_labels, int n_rounds,
+            pbc::Rng& rng, bool track_obs) {
+            std::vector<pbc::AshkinTellerModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::AshkinTellerModel*>());
+            auto r2t    = list_to_ivec(py_r2t);
+            auto t2r    = list_to_ivec(py_t2r);
+            auto labels = list_to_ivec(py_labels);
+
+            auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
+                                       n_rounds, rng, track_obs);
+
+            ivec_to_list(res.r2t, py_r2t);
+            ivec_to_list(res.t2r, py_t2r);
+            ivec_to_list(res.labels, py_labels);
+            return pt_result_to_dict(res);
+        },
+        py::arg("replicas"), py::arg("temps"),
+        py::arg("r2t"), py::arg("t2r"), py::arg("labels"),
+        py::arg("n_rounds"), py::arg("rng"),
+        py::arg("track_observables"));
 }

@@ -231,8 +231,8 @@ m.def("pt_rounds_ising", ...);
 - [x] Step 1.5.3: `pt_update_labels()` — label assignment at extremes + binding + tests
 - [x] Step 1.5.4: `pt_accumulate_histograms()` — diffusion counter increments + binding + tests
 - [x] Step 1.5.5: `pt_count_round_trips()` — round-trip detection + binding + tests
-- [ ] Step 1.5.6: `pt_collect_obs()` — per-T-slot energy recording + binding + tests
-- [ ] Step 1.5.7: `pt_rounds()` — thin composition loop + binding + integration test
+- [x] Step 1.5.6: `pt_collect_obs()` — per-T-slot observable recording (all keys via `observables()`) + binding + tests
+- [x] Step 1.5.7: `pt_rounds()` — thin composition loop + binding + integration test
 - [ ] Step 1.5.8: Update `_core.pyi` type stubs for all new functions
 
 ## Model Interface (contract between C++ models and Python orchestration)
@@ -847,11 +847,12 @@ python scripts/generate_dataset.py \
 - [x] Unit: `pt_count_round_trips` detects UP→DOWN transition at slot M-1
 - [x] Unit: `pt_count_round_trips` returns 0 when no transition occurs
 
-#### `tests/test_pt_rounds.py` — composition loop integration (Steps 1.5.6–1.5.7)
-- [ ] Unit: `pt_collect_obs` records valid energies per T slot per round
-- [ ] Unit: `pt_rounds` with track_observables=False returns empty obs_streams
-- [ ] Integration: `pt_rounds` with close T over many rounds produces round trips > 0
-- [ ] Integration: f(T) monotonicity — UP fraction higher at cold end than hot end
+#### `tests/test_pt_rounds.py` — composition loop integration (Steps 1.5.6–1.5.7) ✅
+- [x] Unit: `pt_collect_obs` records all observables per T slot per round
+- [x] Unit: `pt_rounds` with track_observables=False returns empty obs_streams
+- [x] Integration: `pt_rounds` with close T over many rounds produces round trips > 0
+- [x] Integration: f(T) monotonicity — UP fraction higher at cold end than hot end
+- [x] Integration: obs_streams has all Ising keys with n_rounds entries when tracking
 
 ### Phase 2 Tests — PT Orchestration (`tests/test_parallel_tempering.py`)
 
