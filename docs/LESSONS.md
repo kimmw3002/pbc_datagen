@@ -23,6 +23,11 @@ Hard-won insights from building this codebase. Read this before writing new code
   have tiny probability. With too few samples the expected count drops below 5 and the test
   becomes unreliable. Fix: increase samples (we use 500k for the 2×2 tests).
 
+- **After dropping low-expected bins, rescale expected to match the observed sum.** Dropping
+  bins with expected < 5 removes a tiny fraction of probability mass, making `sum(obs) !=
+  sum(exp)`. scipy's `chisquare` rejects this mismatch. Fix: `exp *= obs.sum() / exp.sum()`
+  after filtering. The rescaling is negligible (< 0.001%) and keeps the test valid.
+
 ## C++ / Build
 
 - **Rebuild after C++ changes:** `uv sync --all-extras --reinstall-package pbc-datagen`.

@@ -59,7 +59,9 @@ If you're new to C++/Python interop:
 ## Running tests
 
 ```bash
-pytest
+pytest                  # fast unit tests only (integration tests skipped by default)
+pytest -m integration   # slow integration tests only (detailed-balance chi-squared)
+pytest -m ""            # everything
 ```
 
 ## Project structure

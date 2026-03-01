@@ -54,186 +54,27 @@ separately so `energy()` recomputes from `−σ_c − τ_c − U·four` when U c
 Tests: `tests/test_observable_cache.py` — 14 tests across all 3 models × 4–5 mutation paths,
 Python O(N) recomputation vs C++ cached values. Includes AT remapped (U > 1) regime.
 
-### 1.5 C++ PT Inner Loop
+### 1.5 C++ PT Inner Loop ✅
 
-`src/cpp/pt_engine.hpp` — Small, independently testable functions that each
-do one thing. Composed into `pt_rounds()` which is a thin loop calling them
-in order. Every function is bound via pybind11 and tested in isolation.
+`src/cpp/include/pt_engine.hpp` — Small, independently testable functions composed into `pt_rounds()`.
+Temps sorted ascending (slot 0 = cold, slot M-1 = hot). Directional labels: `LABEL_NONE=0`, `LABEL_UP=1`, `LABEL_DOWN=-1`.
 
-temperatures sorted ascending: `temps[0] = T_min` (coldest),
-`temps[M-1] = T_max` (hottest). Slot 0 = cold end, slot M-1 = hot end.
+- [x] Step 1.5.1: `pt_exchange()` — pure Metropolis accept/reject for single gap
+- [x] Step 1.5.2: `pt_exchange_round<Model>()` — M random gap proposals with r2t/t2r map updates
+- [x] Step 1.5.3: `pt_update_labels()` — UP at cold end, DOWN at hot end
+- [x] Step 1.5.4: `pt_accumulate_histograms()` — per-slot n_up/n_down diffusion counters
+- [x] Step 1.5.5: `pt_count_round_trips()` — detect UP→DOWN transition at hot end
+- [x] Step 1.5.6: `pt_collect_obs<Model>()` — records ALL observables via `model->observables()` per T slot
+- [x] Step 1.5.7: `pt_rounds<Model>()` — composition loop: sweep + exchange + labels + histograms + collect_obs → `PTResult`
+- [x] Step 1.5.8: `_core.pyi` type stubs with `PTResult(TypedDict)` for all PT functions
+- [x] Step 1.5.9: `test_pt_detailed_balance.py` — 2×2 exact partition function chi-squared tests for all 4 model variants (Ising, BC D=1.0, AT U=0.5, AT U=1.5 remapped). Marked `@pytest.mark.integration` (skipped by default, run with `pytest -m integration`).
 
-Directional label convention (ints):
-- `LABEL_NONE = 0` — no label yet
-- `LABEL_UP = 1` — last visited T_min (cold end, slot 0)
-- `LABEL_DOWN = -1` — last visited T_max (hot end, slot M-1)
+Key decisions: each model exposes `observables()` returning `vector<pair<string, double>>`.
+`ObsStreams = map<string, vector<vector<double>>>` keyed by observable name.
+pybind11 bindings use list-copy pattern for mutable int arrays (test-only overhead; `pt_rounds` stays in C++).
+Bound per-model: `pt_exchange_round_ising/bc/at`, `pt_collect_obs_ising`, `pt_rounds_ising/bc/at`.
 
-#### 1.5.1 `pt_exchange` — single-gap exchange decision
-
-```cpp
-bool pt_exchange(double E_i, double E_j, double T_i, double T_j, Rng& rng);
-```
-
-Pure function. Returns true (accept) or false (reject). Metropolis criterion:
-```
-A = min(1, exp((1/T_i - 1/T_j) × (E_i - E_j)))
-```
-When `T_i == T_j`, always returns true (Δ(1/T) = 0 → exp(0) = 1).
-No side effects — easy to test with exact values.
-
-#### 1.5.2 `pt_exchange_round` — M random swap proposals
-
-```cpp
-template<typename Model>
-void pt_exchange_round(
-    std::vector<Model*>& replicas,       // M replicas (read energy only)
-    const std::vector<double>& temps,    // M temperatures, sorted ascending
-    std::vector<int>& r2t,               // replica_to_temp (mutated)
-    std::vector<int>& t2r,               // temp_to_replica (mutated)
-    std::vector<int>& n_accepts,         // per-gap accept count (mutated)
-    std::vector<int>& n_attempts,        // per-gap attempt count (mutated)
-    Rng& rng
-);
-```
-
-Makes M random swap proposals (like Metropolis picks N random sites):
-1. Pick a random gap `g = rng.rand_below(M - 1)`.
-2. Look up replicas at slots `g` and `g+1` via `t2r`, read their energies.
-3. Call `pt_exchange(E_g, E_{g+1}, temps[g], temps[g+1], rng)`.
-4. On accept: swap `r2t` and `t2r` entries. Increment `n_accepts[g]`.
-5. Always increment `n_attempts[g]`.
-6. Repeat M times.
-
-No parity tracking — every gap is reachable on every round.
-Testable: pass known energies + temps, check map changes and counts.
-
-#### 1.5.3 `pt_update_labels` — assign directional labels at extremes
-
-```cpp
-void pt_update_labels(
-    std::vector<int>& labels,            // per-replica labels (mutated)
-    const std::vector<int>& t2r,         // temp_to_replica
-    int M                                // number of replicas
-);
-```
-
-- `labels[t2r[0]]` = `LABEL_UP` (replica at coldest slot → released upward)
-- `labels[t2r[M-1]]` = `LABEL_DOWN` (replica at hottest slot → released downward)
-- All other labels unchanged.
-
-Pure index arithmetic — trivially testable.
-
-#### 1.5.4 `pt_accumulate_histograms` — increment diffusion counters
-
-```cpp
-void pt_accumulate_histograms(
-    std::vector<int>& n_up,              // per-T-slot up counter (mutated)
-    std::vector<int>& n_down,            // per-T-slot down counter (mutated)
-    const std::vector<int>& labels,      // per-replica labels
-    const std::vector<int>& t2r,         // temp_to_replica
-    int M
-);
-```
-
-For each T slot `t`: look up `labels[t2r[t]]`. If `LABEL_UP` → `n_up[t]++`.
-If `LABEL_DOWN` → `n_down[t]++`. If `LABEL_NONE` → skip.
-
-Pure index arithmetic — trivially testable with synthetic labels.
-
-#### 1.5.5 `pt_count_round_trips` — detect completed round trips
-
-```cpp
-int pt_count_round_trips(
-    const std::vector<int>& labels,      // current labels (after update)
-    const std::vector<int>& prev_labels, // labels before this round's update
-    const std::vector<int>& t2r,         // temp_to_replica
-    int M
-);
-```
-
-A round trip completes when an `UP`-labeled replica reaches T_max (slot M-1)
-and gets relabeled `DOWN`. Specifically: check the replica at slot M-1 —
-if `prev_labels[r] == LABEL_UP` and `labels[r] == LABEL_DOWN`, that's one
-completed trip. Returns the count (0 or 1 per call, since only one replica
-sits at slot M-1).
-
-Testable with synthetic label arrays — no models needed.
-
-#### 1.5.6 `pt_collect_obs` — record per-T-slot observables
-
-```cpp
-template<typename Model>
-void pt_collect_obs(
-    std::vector<std::vector<double>>& obs_streams, // [M][n_rounds_so_far]
-    const std::vector<Model*>& replicas,
-    const std::vector<int>& t2r,
-    int M
-);
-```
-
-For each T slot `t`: read `replicas[t2r[t]]->energy()`, append to
-`obs_streams[t]`. Only called when `track_observables` is true.
-
-#### 1.5.7 `pt_rounds` — thin composition loop
-
-```cpp
-template<typename Model>
-PTResult pt_rounds(
-    std::vector<Model*>& replicas,       // M replicas
-    const std::vector<double>& temps,    // M temperatures, sorted ascending
-    std::vector<int>& r2t,               // address map (mutated)
-    std::vector<int>& t2r,               // inverse map (mutated)
-    std::vector<int>& labels,            // directional labels (mutated)
-    int n_rounds,
-    Rng& rng,
-    bool track_observables = false
-);
-```
-
-The loop body is just calls to the functions above:
-```
-for round in 0..n_rounds:
-    for each replica r:
-        replicas[r]->set_temperature(temps[r2t[r]])
-        replicas[r]->sweep(1)
-    prev_labels = copy(labels)
-    pt_exchange_round(replicas, temps, r2t, t2r, n_accepts, n_attempts, rng)
-    pt_update_labels(labels, t2r, M)
-    pt_accumulate_histograms(n_up, n_down, labels, t2r, M)
-    round_trip_count += pt_count_round_trips(labels, prev_labels, t2r, M)
-    if track_observables:
-        pt_collect_obs(obs_streams, replicas, t2r, M)
-```
-
-Returns `PTResult` dict with all accumulated state.
-
-Bound in `bindings.cpp` three times via template instantiation (only
-`pt_exchange_round`, `pt_collect_obs`, and `pt_rounds` are templated;
-the rest are plain functions):
-```cpp
-// Non-templated (bound once)
-m.def("pt_exchange", &pt_exchange);
-m.def("pt_update_labels", &pt_update_labels);
-m.def("pt_accumulate_histograms", &pt_accumulate_histograms);
-m.def("pt_count_round_trips", &pt_count_round_trips);
-
-// Templated (bound per model)
-m.def("pt_exchange_round_ising", ...);
-m.def("pt_collect_obs_ising", ...);
-m.def("pt_rounds_ising", ...);
-// ... _bc and _at variants
-```
-
-#### Steps
-
-- [x] Step 1.5.1: `pt_exchange()` — pure accept/reject function + pybind11 binding + tests
-- [x] Step 1.5.2: `pt_exchange_round()` — M random gap proposals + map updates + binding + tests
-- [x] Step 1.5.3: `pt_update_labels()` — label assignment at extremes + binding + tests
-- [x] Step 1.5.4: `pt_accumulate_histograms()` — diffusion counter increments + binding + tests
-- [x] Step 1.5.5: `pt_count_round_trips()` — round-trip detection + binding + tests
-- [x] Step 1.5.6: `pt_collect_obs()` — per-T-slot observable recording (all keys via `observables()`) + binding + tests
-- [x] Step 1.5.7: `pt_rounds()` — thin composition loop + binding + integration test
-- [ ] Step 1.5.8: Update `_core.pyi` type stubs for all new functions
+Tests: `tests/test_pt_exchange.py` (3), `test_pt_exchange_round.py` (4), `test_pt_labels.py` (5), `test_pt_rounds.py` (6), `test_pt_detailed_balance.py` (4 integration) — 22 tests total.
 
 ## Model Interface (contract between C++ models and Python orchestration)
 

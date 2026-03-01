@@ -39,6 +39,8 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = ["integration: slow end-to-end tests (deselected by default, run with -m integration)"]
 
 [dependency-groups]
 dev = [
