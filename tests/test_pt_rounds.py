@@ -131,7 +131,7 @@ class TestPtRoundsIntegration:
         n_up = result["n_up"]
         n_down = result["n_down"]
 
-        f = []
+        f: list[float | None] = []
         for t in range(M):
             total = n_up[t] + n_down[t]
             if total > 0:

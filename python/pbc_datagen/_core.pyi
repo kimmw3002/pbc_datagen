@@ -1,7 +1,20 @@
 """Type stubs for the C++ _core extension module."""
 
+from typing import TypedDict
+
 import numpy as np
 import numpy.typing as npt
+
+class PTResult(TypedDict):
+    r2t: list[int]
+    t2r: list[int]
+    labels: list[int]
+    n_accepts: list[int]
+    n_attempts: list[int]
+    n_up: list[int]
+    n_down: list[int]
+    round_trip_count: int
+    obs_streams: dict[str, list[list[float]]]
 
 class Rng:
     def __init__(self, seed: int) -> None: ...
@@ -153,7 +166,7 @@ def pt_rounds_ising(
     n_rounds: int,
     rng: Rng,
     track_observables: bool,
-) -> dict[str, object]: ...
+) -> PTResult: ...
 def pt_rounds_bc(
     replicas: list[BlumeCapelModel],
     temps: list[float],
@@ -163,7 +176,7 @@ def pt_rounds_bc(
     n_rounds: int,
     rng: Rng,
     track_observables: bool,
-) -> dict[str, object]: ...
+) -> PTResult: ...
 def pt_rounds_at(
     replicas: list[AshkinTellerModel],
     temps: list[float],
@@ -173,4 +186,4 @@ def pt_rounds_at(
     n_rounds: int,
     rng: Rng,
     track_observables: bool,
-) -> dict[str, object]: ...
+) -> PTResult: ...

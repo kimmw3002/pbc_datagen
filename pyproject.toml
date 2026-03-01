@@ -34,6 +34,9 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 
+[tool.mypy]
+check_untyped_defs = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
