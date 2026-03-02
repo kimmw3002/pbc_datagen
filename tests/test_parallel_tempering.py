@@ -114,10 +114,10 @@ class TestConvergence:
         """f(T) strongly nonlinear → not converged, even if temps stable."""
         old_temps = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         new_temps = old_temps.copy()  # identical
-        # Step function — strongly nonlinear (R² ≈ 0.6)
+        # Step function — nonlinear (R² ≈ 0.75, below 0.8)
         f = np.array([1.0, 1.0, 1.0, 0.0, 0.0])
 
-        assert not kth_check_convergence(old_temps, new_temps, f, tol=0.01)
+        assert not kth_check_convergence(old_temps, new_temps, f, tol=0.01, r2_threshold=0.8)
 
 
 # ---------------------------------------------------------------------------

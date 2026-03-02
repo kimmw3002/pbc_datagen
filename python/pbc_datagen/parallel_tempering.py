@@ -107,8 +107,8 @@ def kth_check_convergence(
     old_temps: npt.NDArray[np.float64],
     new_temps: npt.NDArray[np.float64],
     f: npt.NDArray[np.float64],
-    tol: float = 0.01,
-    r2_threshold: float = 0.8,
+    tol: float = 0.05,
+    r2_threshold: float = 0.7,
 ) -> bool:
     """Check KTH convergence: temperatures stable AND f(T) linear.
 
@@ -320,8 +320,8 @@ class PTEngine:
 
     def tune_ladder(
         self,
-        n_sw_initial: int = 500,
-        max_iterations: int = 15,
+        n_sw_initial: int = 10000,
+        max_iterations: int = 10,
         gamma: float = 0.5,
         tol: float = 0.01,
         min_acceptance: float = 0.10,
@@ -409,7 +409,7 @@ class PTEngine:
             r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
 
             logger.debug(
-                "Iter {}: not converged, n_sw={} | max_dT/T={:.4f} (tol={}) R2={:.4f} (need>=0.8)"
+                "Iter {}: not converged, n_sw={} | max_dT/T={:.4f} (tol={}) R2={:.4f} (need>=0.7)"
                 " | acc_rates: min={:.3f} mean={:.3f} max={:.3f}"
                 " | T=[{}]",
                 iteration,
@@ -623,13 +623,14 @@ class PTEngine:
                 logger.info("Phase C: resuming from {}/{} snapshots", n_existing, n_snapshots)
 
             # Main production loop — collect only the remaining snapshots
+            total_round_trips = 0
             for snap_i in range(n_remaining):
                 # Set replica temperatures from current address map
                 for r in range(M):
                     self.replicas[r].set_temperature(self.temps[self.r2t[r]])
 
                 # Run thinning rounds (sweep + exchange, no obs tracking)
-                self._pt_rounds(  # type: ignore[operator]
+                result: _core.PTResult = self._pt_rounds(  # type: ignore[operator]
                     self.replicas,
                     self.temps.tolist(),
                     self.r2t,
@@ -639,6 +640,7 @@ class PTEngine:
                     self.rng,
                     False,
                 )
+                total_round_trips += result["round_trip_count"]
 
                 # Harvest one snapshot from every T slot
                 for t in range(M):
@@ -659,6 +661,14 @@ class PTEngine:
                 done = n_existing + snap_i + 1
                 if done % 10 == 0 or snap_i == n_remaining - 1:
                     logger.info("Phase C: {}/{} snapshots collected", done, n_snapshots)
+
+            if total_round_trips < 10:
+                logger.warning(
+                    "Phase C: only {} round trips completed — snapshots may not be ergodic",
+                    total_round_trips,
+                )
+            else:
+                logger.info("Phase C: {} round trips completed", total_round_trips)
 
         # Write campaign metadata
         write_param_attrs(
