@@ -95,7 +95,7 @@ Tests: `tests/test_parallel_tempering.py` (15 tests: 4 KTH math, 3 convergence, 
 
 ---
 
-### 2.2 Orchestrator & Param-Level Parallelism ⬜
+### 2.2 Orchestrator & Param-Level Parallelism ✅
 
 File: `python/pbc_datagen/orchestrator.py`
 
@@ -157,9 +157,9 @@ Default behaviour is resume. Each param's HDF5 file IS its checkpoint.
 
 #### Steps
 
-- [ ] Step 2.2.1: `generate_dataset()` — distribute param values across workers via `multiprocessing.Pool`
-- [ ] Step 2.2.2: `run_campaign()` — single-param entry point: construct PTEngine, run A→B→C
-- [ ] Step 2.2.3: Resume logic — scan HDF5 for completed/in-progress params, skip or restore
+- [x] Step 2.2.1: `generate_dataset()` — distribute param values across workers via `multiprocessing.Pool`
+- [x] Step 2.2.2: `run_campaign()` — single-param entry point: construct PTEngine, run A→B→C
+- [x] Step 2.2.3: Resume logic — scan HDF5 for completed/in-progress params, skip or restore
 
 ---
 
@@ -226,12 +226,9 @@ python scripts/generate_dataset.py \
 
 - [ ] Step 2.4.1: argparse CLI wrapping `generate_dataset()` with all parameters + `--new` flag
 
-## Phase 3: Validation & Diagnostics ⬜
+## Phase 3: Validation & Diagnostics (manual)
 
-- [ ] Step 3.1: `validation.py` — equilibration trace plots (E, M vs sweep)
-- [ ] Step 3.2: `validation.py` — cluster scaling check ⟨n⟩ ~ L^{y_h}
-- [ ] Step 3.3: Round-trip diagnostics — t_RT histogram, replica diffusion plot
-- [ ] Step 3.4: Per-gap acceptance rate plot + f(T) fraction plot
+Validation and diagnostics will be done by hand, not via automated tests.
 
 ## Test Plan
 
@@ -265,9 +262,11 @@ python scripts/generate_dataset.py \
 - [x] Unit: `write_param_attrs` round-trips T ladder, τ_max, address map through HDF5 attrs
 - [x] Unit: `read_resume_state` loads last snapshot per T slot and restores attrs
 
-### Phase 2 Tests — Integration (`tests/test_integration.py`) ⬜
+### Phase 2 Tests — Orchestrator (`tests/test_orchestrator.py`) ✅
 
-- [ ] Integration: Full pipeline on 4×4 Ising — PT(A→B→C) → HDF5
-- [ ] Integration: Verify HDF5 layout matches spec (groups, resizable datasets, attrs)
-- [ ] Integration: Round-trip times are finite (replicas actually diffuse)
-- [ ] Integration: Resume from existing HDF5 continues without re-running Phase A/B
+13 tests: `TestFindExistingHdf5` (4), `TestDeriveSeed` (2), `TestRunCampaign` (3), `TestRunCampaignResume` (4).
+
+- [x] Unit: `find_existing_hdf5` returns newest match, ignores wrong model/L
+- [x] Unit: `_derive_seed` is deterministic, differs with offset
+- [x] Integration: fresh campaign creates HDF5 with correct layout and filename
+- [x] Integration: resume reuses file, appends to target, extends seed history

@@ -1,2 +1,152 @@
-# Parallel temperature manager using multiprocessing.
-# TODO: Phase 2 implementation
+# Orchestrator — param-level parallelism for PT campaigns.
+
+from __future__ import annotations
+
+import hashlib
+import time
+from multiprocessing import Pool
+from pathlib import Path
+
+from pbc_datagen.io import read_resume_state
+from pbc_datagen.parallel_tempering import PTEngine
+
+_PARAM_LABELS: dict[str, str] = {
+    "ising": "J",
+    "blume_capel": "D",
+    "ashkin_teller": "U",
+}
+
+
+def _param_label(model_type: str) -> str:
+    """Return the Hamiltonian parameter label for file naming.
+
+    Ising → "J", Blume-Capel → "D", Ashkin-Teller → "U".
+    """
+    label = _PARAM_LABELS.get(model_type)
+    if label is None:
+        msg = f"Unknown model type: {model_type!r}"
+        raise ValueError(msg)
+    return label
+
+
+def _derive_seed(old_seed: int, n_existing: int) -> int:
+    """Deterministic seed derivation for resume.
+
+    Same (old_seed, n_existing) always produces the same new seed.
+    Uses SHA-256 to mix old_seed and n_existing into a new 63-bit seed.
+    """
+    data = f"{old_seed}:{n_existing}".encode()
+    digest = hashlib.sha256(data).digest()
+    # Take first 8 bytes as a 63-bit unsigned integer (fits in Python int)
+    return int.from_bytes(digest[:8], "little") % (2**63)
+
+
+def find_existing_hdf5(
+    output_dir: str | Path,
+    model_type: str,
+    L: int,
+    param_value: float,
+) -> Path | None:
+    """Find the most recent HDF5 file for this (model, L, param) combo.
+
+    Globs for ``{model_type}_L{L}_{label}={param:.4f}_*.h5`` and returns
+    the newest match (by timestamp suffix), or None if no match.
+    """
+    directory = Path(output_dir)
+    label = _param_label(model_type)
+    pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_*.h5"
+
+    matches = sorted(directory.glob(pattern))
+    if not matches:
+        return None
+
+    # Sort by timestamp suffix (the integer before .h5) — return newest
+    def _timestamp(p: Path) -> int:
+        stem = p.stem  # e.g. "ising_L4_J=0.0000_2000000000000"
+        return int(stem.rsplit("_", 1)[-1])
+
+    return max(matches, key=_timestamp)
+
+
+def run_campaign(
+    model_type: str,
+    L: int,
+    param_value: float,
+    T_range: tuple[float, float],
+    n_replicas: int,
+    n_snapshots: int,
+    output_dir: str | Path,
+    force_new: bool = False,
+) -> Path:
+    """Run one PT campaign for a single parameter value.
+
+    Fresh start: create new file, run A→B→C.
+    Resume: find existing file, derive new seed, extend seed_history,
+    run A→B→C (produce appends remaining snapshots).
+
+    Returns the path to the output HDF5 file.
+    """
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    label = _param_label(model_type)
+
+    existing = None if force_new else find_existing_hdf5(directory, model_type, L, param_value)
+
+    if existing is not None:
+        # --- Resume path ---
+        old_seed, state = read_resume_state(existing)
+        seed_history: list[tuple[int, int]] = state["seed_history"]
+
+        # Count existing snapshots (all T slots in lockstep — use first)
+        counts = state["snapshot_counts"]
+        n_existing = min(counts.values()) if counts else 0
+
+        if n_existing >= n_snapshots:
+            return existing  # already done
+
+        # Derive a fresh seed so resumed snapshots use an independent PRNG stream
+        new_seed = _derive_seed(old_seed, n_existing)
+        seed_history.append((n_existing, new_seed))
+
+        # Restore engine with the locked ladder and τ_max from the saved state
+        # — no need to re-tune or re-equilibrate.
+        engine = PTEngine(model_type, L, param_value, T_range, n_replicas, new_seed)
+        engine.temps = state["T_ladder"]
+        engine.ladder_locked = True
+        engine.tau_max = state["tau_max"]
+        engine.produce(existing, n_snapshots, seed_history=seed_history)
+        return existing
+    else:
+        # --- Fresh start ---
+        ts = int(time.time() * 1000)
+        seed = ts % (2**63)
+        filename = f"{model_type}_L{L}_{label}={param_value:.4f}_{ts}.h5"
+        path = directory / filename
+
+        engine = PTEngine(model_type, L, param_value, T_range, n_replicas, seed)
+        engine.tune_ladder()
+        engine.equilibrate()
+        engine.produce(path, n_snapshots)
+        return path
+
+
+def generate_dataset(
+    model_type: str,
+    L: int,
+    param_values: list[float],
+    T_range: tuple[float, float],
+    n_replicas: int = 20,
+    n_snapshots: int = 100,
+    max_workers: int = 4,
+    output_dir: str | Path = "output/",
+    force_new: bool = False,
+) -> None:
+    """Distribute param values across workers via multiprocessing.Pool."""
+    with Pool(max_workers) as pool:
+        pool.starmap(
+            run_campaign,
+            [
+                (model_type, L, p, T_range, n_replicas, n_snapshots, output_dir, force_new)
+                for p in param_values
+            ],
+        )

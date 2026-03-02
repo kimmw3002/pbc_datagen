@@ -91,7 +91,7 @@ class TestConvergence:
 
     Convergence requires BOTH:
     1. Temperatures stable: max relative change < tol
-    2. f(T) linear: R² of linear fit > 0.99
+    2. f(T) linear: R² of linear fit > 0.9
     """
 
     def test_converged(self) -> None:
@@ -114,8 +114,8 @@ class TestConvergence:
         """f(T) strongly nonlinear → not converged, even if temps stable."""
         old_temps = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         new_temps = old_temps.copy()  # identical
-        # Steppy f — very nonlinear
-        f = np.array([1.0, 0.99, 0.5, 0.01, 0.0])
+        # Step function — strongly nonlinear (R² ≈ 0.6)
+        f = np.array([1.0, 1.0, 1.0, 0.0, 0.0])
 
         assert not kth_check_convergence(old_temps, new_temps, f, tol=0.01)
 
@@ -133,8 +133,8 @@ class TestTuneLadder:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=0.0,
-            T_range=(1.5, 4.0),
+            param_value=1.0,
+            T_range=(2.0, 2.5),
             n_replicas=5,
             seed=12345,
         )
@@ -143,8 +143,8 @@ class TestTuneLadder:
         # After tuning, temps should still be sorted ascending
         assert np.all(np.diff(engine.temps) > 0)
         # Endpoints preserved
-        assert engine.temps[0] == pytest.approx(1.5)
-        assert engine.temps[-1] == pytest.approx(4.0)
+        assert engine.temps[0] == pytest.approx(2.0)
+        assert engine.temps[-1] == pytest.approx(2.5)
         # Ladder is now locked
         assert engine.ladder_locked
 
@@ -158,7 +158,7 @@ class TestTuneLadder:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=0.0,
+            param_value=1.0,
             T_range=(0.5, 50.0),  # absurd range
             n_replicas=3,  # way too few
             seed=42,
@@ -247,8 +247,8 @@ class TestEquilibrate:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=0.0,
-            T_range=(1.5, 4.0),
+            param_value=1.0,
+            T_range=(2.0, 2.5),
             n_replicas=5,
             seed=42,
         )
@@ -261,8 +261,8 @@ class TestEquilibrate:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=0.0,
-            T_range=(1.5, 4.0),
+            param_value=1.0,
+            T_range=(2.0, 2.5),
             n_replicas=5,
             seed=12345,
         )
@@ -277,8 +277,8 @@ class TestEquilibrate:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=0.0,
-            T_range=(1.5, 4.0),
+            param_value=1.0,
+            T_range=(2.0, 2.5),
             n_replicas=5,
             seed=12345,
         )

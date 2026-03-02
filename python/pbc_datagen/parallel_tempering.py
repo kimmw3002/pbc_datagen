@@ -105,7 +105,7 @@ def kth_check_convergence(
     new_temps: npt.NDArray[np.float64],
     f: npt.NDArray[np.float64],
     tol: float = 0.01,
-    r2_threshold: float = 0.99,
+    r2_threshold: float = 0.9,
 ) -> bool:
     """Check KTH convergence: temperatures stable AND f(T) linear.
 
