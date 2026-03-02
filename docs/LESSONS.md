@@ -28,6 +28,14 @@ Hard-won insights from building this codebase. Read this before writing new code
   sum(exp)`. scipy's `chisquare` rejects this mismatch. Fix: `exp *= obs.sum() / exp.sum()`
   after filtering. The rescaling is negligible (< 0.001%) and keeps the test valid.
 
+- **Welch t-test + near-constant observables = catastrophic cancellation.** At low T,
+  observables like `abs_m_baxter` saturate to ~1.0 with only float-noise variance (~1e-30).
+  If the first/last 20% segments have a tiny systematic offset (e.g., 1e-15 from warmup),
+  `ttest_ind` produces t≈180, p=0.0 — false rejection. Exactly constant data gives NaN.
+  Fix: check `std < atol + rtol × |mean|` on both segments before calling `ttest_ind`;
+  also treat NaN p-values as passing. Same spirit as the `tau_int` constant-observable
+  guard (commit 300237b).
+
 ## C++ / Build
 
 - **Rebuild after C++ changes:** `uv sync --all-extras --reinstall-package pbc-datagen`.

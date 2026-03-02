@@ -233,6 +233,78 @@ class TestWelchEquilibrationCheck:
 
         assert welch_equilibration_check(obs_streams)
 
+    def test_constant_observable_passes(self) -> None:
+        """Near-constant streams with a tiny warmup offset must pass.
+
+        At low T, observables like abs_m_baxter saturate to ~1.0.
+        During warmup the first few rounds may be 1.0 - 1e-15 before
+        locking to exactly 1.0.  This tiny offset causes catastrophic
+        cancellation in ttest_ind: t≈180, p=0.0.  The variance-floor
+        guard must detect negligible variance and skip the test.
+        """
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        rng = np.random.default_rng(42)
+        M = 5
+        N = 10_000
+        cut = N // 5
+
+        def _near_constant_with_offset() -> list[float]:
+            """Mimic warmup artifact: first 20% offset by 1e-15."""
+            data = np.ones(N)
+            data[:cut] = 1.0 - 1e-15
+            return data.tolist()
+
+        obs_streams: dict[str, list[list[float]]] = {
+            # Near-constant with tiny warmup offset — triggers the bug
+            "abs_m_baxter": [_near_constant_with_offset() for _ in range(M)],
+            # Normal stationary observable alongside it
+            "energy": [rng.normal(-2.0, 0.1, N).tolist() for _ in range(M)],
+        }
+
+        assert welch_equilibration_check(obs_streams)
+
+    def test_exactly_constant_observable_passes(self) -> None:
+        """Perfectly constant streams (every value identical) must pass.
+
+        Zero variance → ttest_ind divides by zero → NaN p-value.
+        The guard must handle this gracefully.
+        """
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        M = 3
+        N = 1_000
+        obs_streams: dict[str, list[list[float]]] = {
+            "abs_m": [[1.0] * N for _ in range(M)],
+        }
+
+        assert welch_equilibration_check(obs_streams)
+
+    def test_constant_plus_drifting_fails(self) -> None:
+        """Constant obs + drifting obs must still catch the drift.
+
+        The variance guard must only skip truly constant observables,
+        not suppress all tests. A drifting observable must still fail.
+        """
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        rng = np.random.default_rng(42)
+        M = 3
+        N = 10_000
+        # One constant observable (should be skipped)
+        # One drifting observable (should fail)
+        drifting = np.linspace(-5, 5, N) + rng.normal(0, 0.1, N)
+        obs_streams: dict[str, list[list[float]]] = {
+            "abs_m": [[1.0] * N for _ in range(M)],
+            "energy": [
+                drifting.tolist(),
+                rng.normal(0, 1, N).tolist(),
+                rng.normal(0, 1, N).tolist(),
+            ],
+        }
+
+        assert not welch_equilibration_check(obs_streams)
+
 
 # ---------------------------------------------------------------------------
 # Phase B: equilibrate() integration

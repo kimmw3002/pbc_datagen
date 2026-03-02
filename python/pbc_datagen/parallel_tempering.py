@@ -140,6 +140,10 @@ def kth_check_convergence(
     return bool(r2 >= r2_threshold)
 
 
+_WELCH_ATOL: float = 1e-12
+_WELCH_RTOL: float = 1e-10
+
+
 def welch_equilibration_check(
     obs_streams: dict[str, list[list[float]]],
     alpha: float = 0.05,
@@ -152,6 +156,12 @@ def welch_equilibration_check(
 
     Uses Bonferroni correction: the per-test threshold is
     α / (n_observables × n_T_slots) to control family-wise error rate.
+
+    Variance-floor guard: when both halves have negligible standard
+    deviation (< _WELCH_ATOL + _WELCH_RTOL × scale), the observable
+    is trivially stationary and the t-test is skipped.  This prevents
+    catastrophic cancellation in ttest_ind on near-constant data
+    (e.g. abs_m_baxter ≈ 1.0 at low T).
 
     Args:
         obs_streams: PTResult obs_streams — obs_streams[name][T_slot]
@@ -180,6 +190,16 @@ def welch_equilibration_check(
             cut = n // 5  # 20%
             first = series[:cut]
             last = series[-cut:]
+
+            # Variance-floor guard: skip t-test for trivially constant data
+            first_arr = np.asarray(first, dtype=np.float64)
+            last_arr = np.asarray(last, dtype=np.float64)
+            std_f, std_l = float(np.std(first_arr)), float(np.std(last_arr))
+            scale = max(abs(float(np.mean(first_arr))), abs(float(np.mean(last_arr))))
+            tol = _WELCH_ATOL + _WELCH_RTOL * scale
+            if std_f < tol and std_l < tol:
+                continue  # trivially stationary
+
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 _, p_value = stats.ttest_ind(first, last, equal_var=False)
@@ -190,6 +210,9 @@ def welch_equilibration_check(
                     t,
                     str(w.message),
                 )
+            # Belt-and-suspenders: treat NaN p-value as passing
+            if math.isnan(p_value):
+                continue
             if p_value < threshold:
                 return False
 
