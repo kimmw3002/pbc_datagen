@@ -163,7 +163,7 @@ Default behaviour is resume. Each param's HDF5 file IS its checkpoint.
 
 ---
 
-### 2.3 I/O ⬜
+### 2.3 I/O ✅
 
 File: `python/pbc_datagen/io.py`
 
@@ -202,9 +202,9 @@ No need to recompute from saved configurations.
 
 #### Steps
 
-- [ ] Step 2.3.1: `SnapshotWriter` class — open/create HDF5, create groups, streaming append with flush
-- [ ] Step 2.3.2: `write_param_attrs()` — save T ladder, τ_max, address map as HDF5 attrs (updated each snapshot batch)
-- [ ] Step 2.3.3: `read_resume_state()` — load last snapshot per T slot + attrs for resume
+- [x] Step 2.3.1: `SnapshotWriter` class — open/create HDF5, create groups, streaming append with flush
+- [x] Step 2.3.2: `write_param_attrs()` — save T ladder, τ_max, address map as HDF5 attrs (updated each snapshot batch)
+- [x] Step 2.3.3: `read_resume_state()` — load last snapshot per T slot + attrs for resume
 
 ---
 
@@ -256,12 +256,14 @@ python scripts/generate_dataset.py \
 - Welch check: stationary passes, drifting fails, Bonferroni correction
 - equilibrate: requires locked ladder, sets positive τ_max, temps unchanged
 
-### Phase 2 Tests — I/O (`tests/test_io.py`) ⬜
+### Phase 2 Tests — I/O (`tests/test_io.py`) ✅
 
-- [ ] Unit: `SnapshotWriter` creates correct HDF5 group hierarchy
-- [ ] Unit: `append_snapshot` grows dataset by 1 along axis 0, data matches
-- [ ] Unit: `write_param_attrs` round-trips T ladder, τ_max, address map through HDF5 attrs
-- [ ] Unit: `read_resume_state` loads last snapshot per T slot and restores attrs
+12 tests: `TestSnapshotWriterCreation` (2), `TestSnapshotWriterAppend` (4), `TestWriteParamAttrs` (2), `TestReadResumeState` (4).
+
+- [x] Unit: `SnapshotWriter` creates correct HDF5 group hierarchy
+- [x] Unit: `append_snapshot` grows dataset by 1 along axis 0, data matches
+- [x] Unit: `write_param_attrs` round-trips T ladder, τ_max, address map through HDF5 attrs
+- [x] Unit: `read_resume_state` loads last snapshot per T slot and restores attrs
 
 ### Phase 2 Tests — Integration (`tests/test_integration.py`) ⬜
 

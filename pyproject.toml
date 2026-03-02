@@ -37,6 +37,10 @@ select = ["E", "F", "W", "I"]
 [tool.mypy]
 check_untyped_defs = true
 
+[[tool.mypy.overrides]]
+module = "h5py"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not integration'"
