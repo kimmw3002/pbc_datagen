@@ -65,8 +65,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--params",
         type=float,
         nargs="+",
-        required=True,
-        help="Hamiltonian parameter values (D for BC, U for AT, J for Ising)",
+        default=None,
+        help="Hamiltonian parameter values (D for Blume-Capel, U for Ashkin-Teller). "
+        "Not used for Ising (J=1 is fixed).",
     )
     parser.add_argument(
         "--T-range",
@@ -95,6 +96,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
 
+    # --- Validate --params vs model ---
+    if args.model == "ising":
+        if args.params is not None:
+            console.print(
+                "[bold red]Error:[/] Ising has no tunable Hamiltonian parameter "
+                "(J=1 is fixed in C++). Do not pass --params for Ising."
+            )
+            raise SystemExit(1)
+        # Dummy value so the loop runs once — Ising ignores param_value
+        args.params = [0.0]
+    else:
+        if args.params is None:
+            console.print(f"[bold red]Error:[/] --params is required for {args.model}.")
+            raise SystemExit(1)
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -104,15 +120,18 @@ def main(argv: list[str] | None = None) -> None:
     logger.enable("pbc_datagen")
 
     # --- Summary panel ---
-    param_label = {"ising": "J", "blume_capel": "D", "ashkin_teller": "U"}[args.model]
-    params_str = ", ".join(f"{p:.4f}" for p in args.params)
+    param_label: dict[str, str] = {"blume_capel": "D", "ashkin_teller": "U"}
 
     table = Table(show_header=False, border_style="dim", pad_edge=False, box=None)
     table.add_column("key", style="bold", min_width=16)
     table.add_column("value")
     table.add_row("Model", args.model)
     table.add_row("L", str(args.L))
-    table.add_row(f"{param_label} values", params_str)
+    if args.model in param_label:
+        params_str = ", ".join(f"{p:.4f}" for p in args.params)
+        table.add_row(f"{param_label[args.model]} values", params_str)
+    else:
+        table.add_row("J", "1 (fixed)")
     table.add_row("T range", f"[{args.T_range[0]}, {args.T_range[1]}]")
     table.add_row("Replicas", str(args.n_replicas))
     table.add_row("Snapshots/T", str(args.n_snapshots))

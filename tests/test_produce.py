@@ -27,7 +27,7 @@ def _ready_engine(
     *,
     model_type: str = "ising",
     L: int = 4,
-    param_value: float = 1.0,
+    param_value: float = 0.0,
     n_replicas: int = 5,
     seed: int = 12345,
 ) -> PTEngine:
@@ -70,7 +70,7 @@ class TestProducePrecondition:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.5),
             n_replicas=5,
             seed=42,

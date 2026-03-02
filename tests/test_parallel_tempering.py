@@ -133,7 +133,7 @@ class TestTuneLadder:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.5),
             n_replicas=5,
             seed=12345,
@@ -158,7 +158,7 @@ class TestTuneLadder:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(0.5, 50.0),  # absurd range
             n_replicas=3,  # way too few
             seed=42,
@@ -247,7 +247,7 @@ class TestEquilibrate:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.5),
             n_replicas=5,
             seed=42,
@@ -261,7 +261,7 @@ class TestEquilibrate:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.5),
             n_replicas=5,
             seed=12345,
@@ -277,7 +277,7 @@ class TestEquilibrate:
         engine = PTEngine(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.5),
             n_replicas=5,
             seed=12345,

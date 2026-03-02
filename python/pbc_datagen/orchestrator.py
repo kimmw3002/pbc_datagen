@@ -33,23 +33,24 @@ def _worker_init(log_file: str | None) -> None:
         logger.add(log_file, format=fmt_plain, level="DEBUG")
 
 
+_VALID_MODELS: set[str] = {"ising", "blume_capel", "ashkin_teller"}
+
 _PARAM_LABELS: dict[str, str] = {
-    "ising": "J",
     "blume_capel": "D",
     "ashkin_teller": "U",
 }
 
 
-def _param_label(model_type: str) -> str:
-    """Return the Hamiltonian parameter label for file naming.
+def _param_label(model_type: str) -> str | None:
+    """Return the Hamiltonian parameter label for file naming, or None.
 
-    Ising → "J", Blume-Capel → "D", Ashkin-Teller → "U".
+    Ising has no tunable Hamiltonian parameter (J=1 is fixed in C++),
+    so it returns None.  Blume-Capel → "D", Ashkin-Teller → "U".
     """
-    label = _PARAM_LABELS.get(model_type)
-    if label is None:
+    if model_type not in _VALID_MODELS:
         msg = f"Unknown model type: {model_type!r}"
         raise ValueError(msg)
-    return label
+    return _PARAM_LABELS.get(model_type)
 
 
 def _derive_seed(old_seed: int, n_existing: int) -> int:
@@ -72,12 +73,18 @@ def find_existing_hdf5(
 ) -> Path | None:
     """Find the most recent HDF5 file for this (model, L, param) combo.
 
-    Globs for ``{model_type}_L{L}_{label}={param:.4f}_*.h5`` and returns
-    the newest match (by timestamp suffix), or None if no match.
+    For models with a tunable parameter (BC, AT), globs for
+    ``{model}_L{L}_{label}={param:.4f}_*.h5``.
+    For Ising (no tunable parameter), globs for ``{model}_L{L}_*.h5``.
+
+    Returns the newest match (by timestamp suffix), or None if no match.
     """
     directory = Path(output_dir)
     label = _param_label(model_type)
-    pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_*.h5"
+    if label is not None:
+        pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_*.h5"
+    else:
+        pattern = f"{model_type}_L{L}_*.h5"
 
     matches = sorted(directory.glob(pattern))
     if not matches:
@@ -86,7 +93,7 @@ def find_existing_hdf5(
 
     # Sort by timestamp suffix (the integer before .h5) — return newest
     def _timestamp(p: Path) -> int:
-        stem = p.stem  # e.g. "ising_L4_J=0.0000_2000000000000"
+        stem = p.stem  # e.g. "blume_capel_L4_D=1.5000_2000000000000"
         return int(stem.rsplit("_", 1)[-1])
 
     result = max(matches, key=_timestamp)
@@ -154,7 +161,10 @@ def run_campaign(
         # --- Fresh start ---
         ts = int(time.time() * 1000)
         seed = ts % (2**63)
-        filename = f"{model_type}_L{L}_{label}={param_value:.4f}_{ts}.h5"
+        if label is not None:
+            filename = f"{model_type}_L{L}_{label}={param_value:.4f}_{ts}.h5"
+        else:
+            filename = f"{model_type}_L{L}_{ts}.h5"
         path = directory / filename
         logger.info("Fresh campaign: {}", filename)
 

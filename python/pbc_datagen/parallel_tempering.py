@@ -298,15 +298,25 @@ class PTEngine:
         self.ladder_locked = False
         self.tau_max: float | None = None
 
-        logger.info(
-            "PTEngine created: model={} L={} param={:.4f} replicas={} T=[{:.4f}, {:.4f}]",
-            model_type,
-            L,
-            param_value,
-            n_replicas,
-            T_range[0],
-            T_range[1],
-        )
+        if model_type == "ising":
+            logger.info(
+                "PTEngine created: model={} L={} replicas={} T=[{:.4f}, {:.4f}]",
+                model_type,
+                L,
+                n_replicas,
+                T_range[0],
+                T_range[1],
+            )
+        else:
+            logger.info(
+                "PTEngine created: model={} L={} param={:.4f} replicas={} T=[{:.4f}, {:.4f}]",
+                model_type,
+                L,
+                param_value,
+                n_replicas,
+                T_range[0],
+                T_range[1],
+            )
 
     def tune_ladder(
         self,

@@ -106,7 +106,12 @@ independent PT campaign — embarrassingly parallel across `max_workers` cores.
 def find_existing_hdf5(output_dir, model_type, L, param_value):
     """Find the most recent HDF5 file for this (model, L, param) combo."""
     # Glob for matching files, sort by timestamp suffix, return newest or None
-    pattern = f"{model_type}_L{L}_{param_label}={param_value:.4f}_*.h5"
+    # Ising has no tunable param — label is None
+    label = _param_label(model_type)  # "D", "U", or None
+    if label is not None:
+        pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_*.h5"
+    else:
+        pattern = f"{model_type}_L{L}_*.h5"
     ...
 
 def run_campaign(model_type, L, param_value, T_range, n_replicas,
@@ -122,7 +127,11 @@ def run_campaign(model_type, L, param_value, T_range, n_replicas,
         # Clean start: new timestamp, new file
         ts = int(time.time() * 1000)
         seed = ts % 2**63
-        path = f"{output_dir}/{model_type}_L{L}_{param_label}={param_value:.4f}_{ts}.h5"
+        label = _param_label(model_type)  # None for Ising
+        if label is not None:
+            path = f"{output_dir}/{model_type}_L{L}_{label}={param_value:.4f}_{ts}.h5"
+        else:
+            path = f"{output_dir}/{model_type}_L{L}_{ts}.h5"
     engine = PTEngine(model_type, L, param_value, T_range, n_replicas, seed)
     engine.tune_ladder()                 # Phase A
     engine.equilibrate()                 # Phase B → locks τ_max
@@ -148,7 +157,7 @@ models internally. Workers receive scalar arguments only.
 
 **Seed history:** HDF5 attr `seed_history: list[(int, int)]` — each entry is `(n_snapshots_at_start, seed)`. First entry is `(0, initial_seed)`. Each resume appends `(n_existing_snapshots, derived_seed)`. Enables full replay of which seed produced which snapshots.
 
-**File naming:** `{model_type}_L{L}_{param_label}={param:.4f}_{timestamp_ms}.h5`
+**File naming:** `{model_type}_L{L}_{label}={param:.4f}_{timestamp_ms}.h5` for BC/AT. Ising has no tunable parameter: `ising_L{L}_{timestamp_ms}.h5`.
 
 #### Resume
 

@@ -27,7 +27,7 @@ def _make_campaign_file(directory: Path, name: str, n_snapshots: int = 3) -> Pat
     return run_campaign(
         model_type="ising",
         L=4,
-        param_value=1.0,
+        param_value=0.0,
         T_range=(2.0, 2.1),
         n_replicas=3,
         n_snapshots=n_snapshots,
@@ -47,23 +47,23 @@ class TestFindExistingHdf5:
         """No matching files in the directory → returns None."""
         from pbc_datagen.orchestrator import find_existing_hdf5
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=1.0)
+        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
         assert result is None
 
     def test_returns_newest_matching_file(self, tmp_path: Path) -> None:
         """Two files with different timestamps → returns the one with
         the larger (newer) timestamp suffix.
 
-        File naming: {model}_L{L}_{label}={param:.4f}_{timestamp_ms}.h5
+        Ising has no param segment: ``ising_L4_{timestamp_ms}.h5``.
         """
         from pbc_datagen.orchestrator import find_existing_hdf5
 
-        old = tmp_path / "ising_L4_J=1.0000_1000000000000.h5"
-        new = tmp_path / "ising_L4_J=1.0000_2000000000000.h5"
+        old = tmp_path / "ising_L4_1000000000000.h5"
+        new = tmp_path / "ising_L4_2000000000000.h5"
         _touch_hdf5(old)
         _touch_hdf5(new)
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=1.0)
+        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
         assert result is not None
         assert result.name == new.name
 
@@ -77,7 +77,7 @@ class TestFindExistingHdf5:
         wrong = tmp_path / "blume_capel_L4_D=0.0000_9999999999999.h5"
         _touch_hdf5(wrong)
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=1.0)
+        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
         assert result is None
 
     def test_ignores_wrong_lattice_size(self, tmp_path: Path) -> None:
@@ -87,10 +87,10 @@ class TestFindExistingHdf5:
         """
         from pbc_datagen.orchestrator import find_existing_hdf5
 
-        wrong = tmp_path / "ising_L8_J=1.0000_9999999999999.h5"
+        wrong = tmp_path / "ising_L8_9999999999999.h5"
         _touch_hdf5(wrong)
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=1.0)
+        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
         assert result is None
 
 
@@ -140,7 +140,7 @@ class TestRunCampaign:
         result_path = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -156,17 +156,18 @@ class TestRunCampaign:
                 assert f[g]["snapshots"].shape[0] == 3
 
     def test_output_filename_matches_convention(self, tmp_path: Path) -> None:
-        """Output file name follows {model}_L{L}_{label}={param:.4f}_{ts}.h5.
+        """Ising output file: {model}_L{L}_{ts}.h5 (no param segment).
 
         The timestamp portion is variable, but the prefix must match
-        the campaign parameters exactly.
+        the campaign parameters exactly.  Ising has no tunable
+        Hamiltonian parameter, so no ``J=`` appears in the filename.
         """
         from pbc_datagen.orchestrator import run_campaign
 
         result_path = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -174,7 +175,8 @@ class TestRunCampaign:
         )
 
         name = result_path.name
-        assert name.startswith("ising_L4_J=1.0000_")
+        assert name.startswith("ising_L4_")
+        assert "J=" not in name
         assert name.endswith(".h5")
 
     def test_force_new_creates_separate_file(self, tmp_path: Path) -> None:
@@ -186,7 +188,7 @@ class TestRunCampaign:
         path1 = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -195,7 +197,7 @@ class TestRunCampaign:
         path2 = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -229,7 +231,7 @@ class TestRunCampaignResume:
         path1 = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -238,7 +240,7 @@ class TestRunCampaignResume:
         path2 = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=5,
@@ -256,7 +258,7 @@ class TestRunCampaignResume:
         run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -265,7 +267,7 @@ class TestRunCampaignResume:
         path = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=5,
@@ -291,7 +293,7 @@ class TestRunCampaignResume:
         run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -300,7 +302,7 @@ class TestRunCampaignResume:
         path = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=5,
@@ -328,7 +330,7 @@ class TestRunCampaignResume:
         run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=3,
@@ -337,7 +339,7 @@ class TestRunCampaignResume:
         path = run_campaign(
             model_type="ising",
             L=4,
-            param_value=1.0,
+            param_value=0.0,
             T_range=(2.0, 2.1),
             n_replicas=3,
             n_snapshots=5,
