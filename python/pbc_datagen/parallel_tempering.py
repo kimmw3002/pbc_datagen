@@ -323,7 +323,7 @@ class PTEngine:
         n_sw_initial: int = 10000,
         max_iterations: int = 10,
         gamma: float = 0.5,
-        tol: float = 0.01,
+        tol: float = 0.05,
         min_acceptance: float = 0.10,
     ) -> None:
         """Phase A: KTH feedback loop to optimise temperature placement.
@@ -481,8 +481,8 @@ class PTEngine:
 
     def equilibrate(
         self,
-        n_initial: int = 100_000,
-        n_max: int = 6_400_000,
+        n_initial: int = 10_000,
+        n_max: int = 5_120_000,
         alpha: float = 0.05,
     ) -> None:
         """Phase B: equilibrate on the locked ladder, then measure τ_int.

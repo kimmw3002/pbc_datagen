@@ -56,8 +56,17 @@ def tau_int(x: npt.NDArray[np.float64]) -> float:
 
     where t_cut is the first lag where ρ(t) ≤ 0.  Simple and robust:
     no tuning parameters, works well when N >> τ_int.
+
+    Returns 0.5 (the minimal value) for constant input — this happens
+    legitimately at low temperatures where the system is deeply ordered
+    and observables don't fluctuate.
     """
-    rho = acf_fft(x)
+    try:
+        rho = acf_fft(x)
+    except ValueError:
+        # Constant series: zero variance → ACF undefined.
+        # No autocorrelation to worry about — return minimal τ_int.
+        return 0.5
 
     total = 0.5
     for t in range(1, len(rho)):
