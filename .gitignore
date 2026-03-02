@@ -24,6 +24,7 @@ __pycache__/
 
 # Data output
 data/
+output/
 *.h5
 *.hdf5
 *.npy

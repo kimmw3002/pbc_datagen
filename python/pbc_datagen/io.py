@@ -9,6 +9,7 @@ from typing import Any
 import h5py
 import numpy as np
 import numpy.typing as npt
+from loguru import logger
 
 
 def _t_group_name(T: float) -> str:
@@ -27,6 +28,7 @@ class SnapshotWriter:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._file: h5py.File = h5py.File(self._path, "a")
+        logger.debug("Opened HDF5 file: {}", self._path.name)
 
     def create_temperature_slot(self, T: float, L: int, C: int, obs_names: list[str]) -> None:
         """Create a temperature group with resizable datasets.
@@ -35,7 +37,9 @@ class SnapshotWriter:
         - ``snapshots``: shape ``(0, C, L, L)``, int8, resizable along axis 0
         - One ``(0,)`` float64 dataset per name in *obs_names*
         """
-        grp = self._file.create_group(_t_group_name(T))
+        name = _t_group_name(T)
+        logger.debug("Creating T slot: {} (C={}, L={})", name, C, L)
+        grp = self._file.create_group(name)
         grp.create_dataset(
             "snapshots",
             shape=(0, C, L, L),
@@ -154,5 +158,14 @@ def read_resume_state(path: str | Path) -> tuple[int, dict[str, Any]]:
         "seed_history": seed_history,
         "snapshot_counts": snapshot_counts,
     }
+
+    total = sum(snapshot_counts.values())
+    n_slots = len(snapshot_counts)
+    logger.debug(
+        "Resume state loaded: {} T slots, {} total snapshots, tau_max={:.1f}",
+        n_slots,
+        total,
+        tau_max,
+    )
 
     return seed, state

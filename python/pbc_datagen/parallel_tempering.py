@@ -10,11 +10,14 @@ The hot inner loop (sweep + exchange + histograms) lives in C++
 
 from __future__ import annotations
 
+import math
+import warnings
 from pathlib import Path
 from typing import Union
 
 import numpy as np
 import numpy.typing as npt
+from loguru import logger
 from scipy import stats
 
 import pbc_datagen._core as _core
@@ -177,7 +180,16 @@ def welch_equilibration_check(
             cut = n // 5  # 20%
             first = series[:cut]
             last = series[-cut:]
-            _, p_value = stats.ttest_ind(first, last, equal_var=False)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                _, p_value = stats.ttest_ind(first, last, equal_var=False)
+            for w in caught:
+                logger.warning(
+                    "Welch t-test numerical warning for obs={} T_slot={}: {}",
+                    name,
+                    t,
+                    str(w.message),
+                )
             if p_value < threshold:
                 return False
 
@@ -286,6 +298,16 @@ class PTEngine:
         self.ladder_locked = False
         self.tau_max: float | None = None
 
+        logger.info(
+            "PTEngine created: model={} L={} param={:.4f} replicas={} T=[{:.4f}, {:.4f}]",
+            model_type,
+            L,
+            param_value,
+            n_replicas,
+            T_range[0],
+            T_range[1],
+        )
+
     def tune_ladder(
         self,
         n_sw_initial: int = 500,
@@ -303,6 +325,7 @@ class PTEngine:
             RuntimeError: If max_iterations reached without convergence,
                 or if any gap acceptance rate < min_acceptance after tuning.
         """
+        logger.info("Phase A: tuning ladder (KTH feedback)")
         M = self.n_replicas
         n_sw = n_sw_initial
 
@@ -339,6 +362,12 @@ class PTEngine:
             # Skip redistribution if too few slots have data
             n_valid = int(np.sum(valid))
             if n_valid < 3:
+                logger.debug(
+                    "Iter {}: only {}/{} slots have data, doubling n_sw",
+                    iteration,
+                    n_valid,
+                    M,
+                )
                 # Not enough data yet — double and retry
                 if iteration < 10:
                     n_sw = min(n_sw * 2, n_sw_initial * (2**10))
@@ -353,7 +382,10 @@ class PTEngine:
 
             # Check convergence
             if kth_check_convergence(old_temps, self.temps, f, tol=tol):
+                logger.info("Phase A: converged at iteration {} (n_sw={})", iteration, n_sw)
                 break
+
+            logger.debug("Iter {}: not converged, n_sw={}", iteration, n_sw)
 
             # Double N_sw (cap at iteration 10)
             if iteration < 10:
@@ -387,6 +419,13 @@ class PTEngine:
         n_attempts = np.array(check_result["n_attempts"], dtype=np.float64)
         rates = np.where(n_attempts > 0, n_accepts / n_attempts, 0.0)
 
+        logger.debug(
+            "Post-tuning acceptance rates: min={:.3f} max={:.3f} mean={:.3f}",
+            float(np.min(rates)),
+            float(np.max(rates)),
+            float(np.mean(rates)),
+        )
+
         bad_gaps = np.where(rates < min_acceptance)[0]
         if len(bad_gaps) > 0:
             worst = bad_gaps[0]
@@ -399,6 +438,12 @@ class PTEngine:
             raise RuntimeError(msg)
 
         self.ladder_locked = True
+        logger.info(
+            "Phase A: ladder locked, T=[{:.4f}, {:.4f}], {} replicas",
+            self.temps[0],
+            self.temps[-1],
+            M,
+        )
 
     def equilibrate(
         self,
@@ -423,6 +468,7 @@ class PTEngine:
             msg = "Ladder must be locked before equilibration — call tune_ladder() first"
             raise RuntimeError(msg)
 
+        logger.info("Phase B: equilibrating (Welch t-test, n_initial={})", n_initial)
         M = self.n_replicas
         n_rounds = n_initial
 
@@ -447,6 +493,7 @@ class PTEngine:
 
             # Welch t-test equilibration check
             if welch_equilibration_check(obs_streams, alpha=alpha):
+                logger.debug("Welch test passed at n_rounds={}", n_rounds)
                 # Equilibrated — measure τ_int on last 80% (discard first 20% burn-in)
                 burn_in = n_rounds // 5
                 trimmed: dict[str, npt.NDArray[np.float64]] = {}
@@ -458,9 +505,11 @@ class PTEngine:
                         trimmed[key] = np.array(slots[t][burn_in:], dtype=np.float64)
 
                 _, self.tau_max = tau_int_multi(trimmed)
+                logger.info("Phase B: equilibrated, tau_max={:.1f}", self.tau_max)
                 return
 
             # Not equilibrated — double and retry
+            logger.debug("Welch test failed at n_rounds={}, doubling", n_rounds)
             n_rounds *= 2
 
         msg = (
@@ -510,7 +559,13 @@ class PTEngine:
         obs_names = list(self.replicas[0].observables().keys())
 
         # Thinning: at least 1 round between snapshots
-        thinning = max(1, round(3 * self.tau_max))
+        thinning = max(1, math.ceil(3 * self.tau_max))
+
+        logger.info(
+            "Phase C: producing snapshots (target={}, thinning={} rounds)",
+            n_snapshots,
+            thinning,
+        )
 
         with SnapshotWriter(path) as writer:
             # Create T slots only if they don't already exist
@@ -523,10 +578,18 @@ class PTEngine:
             n_existing = writer._file[first_key]["snapshots"].shape[0]
             n_remaining = n_snapshots - n_existing
             if n_remaining <= 0:
+                logger.info(
+                    "Phase C: already have {}/{} snapshots, nothing to do",
+                    n_existing,
+                    n_snapshots,
+                )
                 return
 
+            if n_existing > 0:
+                logger.info("Phase C: resuming from {}/{} snapshots", n_existing, n_snapshots)
+
             # Main production loop — collect only the remaining snapshots
-            for _ in range(n_remaining):
+            for snap_i in range(n_remaining):
                 # Set replica temperatures from current address map
                 for r in range(M):
                     self.replicas[r].set_temperature(self.temps[self.r2t[r]])
@@ -558,6 +621,10 @@ class PTEngine:
 
                     obs = replica.observables()
                     writer.append_snapshot(T=T, spins=spins, obs_dict=obs)
+
+                done = n_existing + snap_i + 1
+                if done % 10 == 0 or snap_i == n_remaining - 1:
+                    logger.info("Phase C: {}/{} snapshots collected", done, n_snapshots)
 
         # Write campaign metadata
         write_param_attrs(

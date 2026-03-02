@@ -7,8 +7,31 @@ import time
 from multiprocessing import Pool
 from pathlib import Path
 
+from loguru import logger
+
 from pbc_datagen.io import read_resume_state
 from pbc_datagen.parallel_tempering import PTEngine
+
+_LOG_FILE: str | None = None
+
+
+def _worker_init(log_file: str | None) -> None:
+    """Pool initializer: set up loguru in worker processes.
+
+    Forked workers inherit handler objects but the enqueue background
+    thread dies on fork.  Set up fresh handlers in each worker.
+    """
+    import sys
+
+    logger.remove()
+    logger.enable("pbc_datagen")
+
+    fmt_plain = "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {message}"
+    fmt_color = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | {message}"
+    logger.add(sys.stdout, format=fmt_color, level="INFO", colorize=True)
+    if log_file is not None:
+        logger.add(log_file, format=fmt_plain, level="DEBUG")
+
 
 _PARAM_LABELS: dict[str, str] = {
     "ising": "J",
@@ -58,6 +81,7 @@ def find_existing_hdf5(
 
     matches = sorted(directory.glob(pattern))
     if not matches:
+        logger.debug("No existing HDF5 for pattern {}", pattern)
         return None
 
     # Sort by timestamp suffix (the integer before .h5) — return newest
@@ -65,7 +89,9 @@ def find_existing_hdf5(
         stem = p.stem  # e.g. "ising_L4_J=0.0000_2000000000000"
         return int(stem.rsplit("_", 1)[-1])
 
-    return max(matches, key=_timestamp)
+    result = max(matches, key=_timestamp)
+    logger.debug("Found existing HDF5: {}", result.name)
+    return result
 
 
 def run_campaign(
@@ -94,6 +120,7 @@ def run_campaign(
 
     if existing is not None:
         # --- Resume path ---
+        logger.info("Resuming campaign from {}", existing.name)
         old_seed, state = read_resume_state(existing)
         seed_history: list[tuple[int, int]] = state["seed_history"]
 
@@ -102,11 +129,18 @@ def run_campaign(
         n_existing = min(counts.values()) if counts else 0
 
         if n_existing >= n_snapshots:
+            logger.info("Already complete ({}/{} snapshots), skipping", n_existing, n_snapshots)
             return existing  # already done
 
         # Derive a fresh seed so resumed snapshots use an independent PRNG stream
         new_seed = _derive_seed(old_seed, n_existing)
         seed_history.append((n_existing, new_seed))
+        logger.debug(
+            "Resume: {}/{} snapshots exist, derived seed={}",
+            n_existing,
+            n_snapshots,
+            new_seed,
+        )
 
         # Restore engine with the locked ladder and τ_max from the saved state
         # — no need to re-tune or re-equilibrate.
@@ -122,11 +156,13 @@ def run_campaign(
         seed = ts % (2**63)
         filename = f"{model_type}_L{L}_{label}={param_value:.4f}_{ts}.h5"
         path = directory / filename
+        logger.info("Fresh campaign: {}", filename)
 
         engine = PTEngine(model_type, L, param_value, T_range, n_replicas, seed)
         engine.tune_ladder()
         engine.equilibrate()
         engine.produce(path, n_snapshots)
+        logger.info("Campaign complete: {}", filename)
         return path
 
 
@@ -140,9 +176,15 @@ def generate_dataset(
     max_workers: int = 4,
     output_dir: str | Path = "output/",
     force_new: bool = False,
+    log_file: str | None = None,
 ) -> None:
     """Distribute param values across workers via multiprocessing.Pool."""
-    with Pool(max_workers) as pool:
+    logger.info(
+        "Generating dataset: {} param values across {} workers",
+        len(param_values),
+        max_workers,
+    )
+    with Pool(max_workers, initializer=_worker_init, initargs=(log_file,)) as pool:
         pool.starmap(
             run_campaign,
             [

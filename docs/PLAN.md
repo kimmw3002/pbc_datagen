@@ -208,7 +208,7 @@ No need to recompute from saved configurations.
 
 ---
 
-### 2.4 CLI Entry Point ⬜
+### 2.4 CLI Entry Point ✅
 
 File: `scripts/generate_dataset.py`
 
@@ -224,7 +224,7 @@ python scripts/generate_dataset.py \
     --new   # optional: ignore existing files, start fresh with new timestamp
 ```
 
-- [ ] Step 2.4.1: argparse CLI wrapping `generate_dataset()` with all parameters + `--new` flag
+- [x] Step 2.4.1: argparse CLI wrapping `generate_dataset()` with all parameters + `--new` flag
 
 ## Phase 3: Validation & Diagnostics (manual)
 
