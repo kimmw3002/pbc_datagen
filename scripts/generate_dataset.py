@@ -23,16 +23,18 @@ VALID_MODELS = ("ising", "blume_capel", "ashkin_teller")
 console = Console()
 
 
-def _setup_logging(output_dir: Path) -> Path:
+def _setup_logging(output_dir: Path) -> tuple[Path, str]:
     """Configure loguru: stdout + timestamped log file in logs/.
 
-    Returns the log file path.
+    Returns (log_file, log_prefix).  Workers use the prefix to build
+    per-PID log filenames, avoiding interleaved output.
     """
     log_dir = output_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"run_{ts}.log"
+    log_prefix = str(log_dir / f"run_{ts}")
 
     # Remove default stderr handler
     logger.remove()
@@ -46,7 +48,7 @@ def _setup_logging(output_dir: Path) -> Path:
     # File — DEBUG and above, no color tags
     logger.add(str(log_file), format=fmt_plain, level="DEBUG")
 
-    return log_file
+    return log_file, log_prefix
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -118,7 +120,7 @@ def main(argv: list[str] | None = None) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = _setup_logging(output_dir)
+    log_file, log_prefix = _setup_logging(output_dir)
 
     # Enable library logging (disabled by default in pbc_datagen/__init__.py)
     logger.enable("pbc_datagen")
@@ -170,7 +172,7 @@ def main(argv: list[str] | None = None) -> None:
         max_workers=args.workers,
         output_dir=str(output_dir),
         force_new=args.new,
-        log_file=str(log_file),
+        log_prefix=log_prefix,
     )
 
     elapsed = time.perf_counter() - t0

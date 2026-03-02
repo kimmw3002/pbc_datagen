@@ -12,15 +12,17 @@ from loguru import logger
 from pbc_datagen.io import read_resume_state
 from pbc_datagen.parallel_tempering import PTEngine
 
-_LOG_FILE: str | None = None
 
-
-def _worker_init(log_file: str | None) -> None:
+def _worker_init(log_prefix: str | None) -> None:
     """Pool initializer: set up loguru in worker processes.
 
     Forked workers inherit handler objects but the enqueue background
     thread dies on fork.  Set up fresh handlers in each worker.
+
+    Each worker writes to its own log file (``{log_prefix}_worker_{pid}.log``)
+    so output from different workers never interleaves.
     """
+    import os
     import sys
 
     logger.remove()
@@ -29,7 +31,8 @@ def _worker_init(log_file: str | None) -> None:
     fmt_plain = "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {message}"
     fmt_color = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | {message}"
     logger.add(sys.stdout, format=fmt_color, level="INFO", colorize=True)
-    if log_file is not None:
+    if log_prefix is not None:
+        log_file = f"{log_prefix}_worker_{os.getpid()}.log"
         logger.add(log_file, format=fmt_plain, level="DEBUG")
 
 
@@ -194,7 +197,7 @@ def generate_dataset(
     max_workers: int = 4,
     output_dir: str | Path = "output/",
     force_new: bool = False,
-    log_file: str | None = None,
+    log_prefix: str | None = None,
 ) -> None:
     """Distribute param values across workers via multiprocessing.Pool."""
     logger.info(
@@ -202,7 +205,7 @@ def generate_dataset(
         len(param_values),
         max_workers,
     )
-    with Pool(max_workers, initializer=_worker_init, initargs=(log_file,)) as pool:
+    with Pool(max_workers, initializer=_worker_init, initargs=(log_prefix,)) as pool:
         pool.starmap(
             run_campaign,
             [
