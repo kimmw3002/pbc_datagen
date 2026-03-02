@@ -108,7 +108,7 @@ def kth_check_convergence(
     new_temps: npt.NDArray[np.float64],
     f: npt.NDArray[np.float64],
     tol: float = 0.01,
-    r2_threshold: float = 0.9,
+    r2_threshold: float = 0.8,
 ) -> bool:
     """Check KTH convergence: temperatures stable AND f(T) linear.
 
@@ -321,7 +321,7 @@ class PTEngine:
     def tune_ladder(
         self,
         n_sw_initial: int = 500,
-        max_iterations: int = 100,
+        max_iterations: int = 15,
         gamma: float = 0.5,
         tol: float = 0.01,
         min_acceptance: float = 0.10,
@@ -369,6 +369,11 @@ class PTEngine:
             f = np.zeros(M)
             f[valid] = n_up[valid] / total[valid]
 
+            # Acceptance rates per gap (for diagnostics)
+            n_accepts = np.array(result["n_accepts"], dtype=np.float64)
+            n_attempts = np.array(result["n_attempts"], dtype=np.float64)
+            acc_rates = np.where(n_attempts > 0, n_accepts / n_attempts, 0.0)
+
             # Skip redistribution if too few slots have data
             n_valid = int(np.sum(valid))
             if n_valid < 3:
@@ -378,9 +383,7 @@ class PTEngine:
                     n_valid,
                     M,
                 )
-                # Not enough data yet — double and retry
-                if iteration < 10:
-                    n_sw = min(n_sw * 2, n_sw_initial * (2**10))
+                n_sw *= 2
                 continue
 
             # Compute target temperatures via KTH redistribution
@@ -395,11 +398,32 @@ class PTEngine:
                 logger.info("Phase A: converged at iteration {} (n_sw={})", iteration, n_sw)
                 break
 
-            logger.debug("Iter {}: not converged, n_sw={}", iteration, n_sw)
+            # Compute diagnostic metrics (same as kth_check_convergence)
+            interior = slice(1, -1)
+            rel_change = np.abs(self.temps[interior] - old_temps[interior]) / old_temps[interior]
+            max_rel = float(np.max(rel_change))
+            coeffs = np.polyfit(old_temps, f, 1)
+            f_pred = np.polyval(coeffs, old_temps)
+            ss_res = float(np.sum((f - f_pred) ** 2))
+            ss_tot = float(np.sum((f - np.mean(f)) ** 2))
+            r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
 
-            # Double N_sw (cap at iteration 10)
-            if iteration < 10:
-                n_sw = min(n_sw * 2, n_sw_initial * (2**10))
+            logger.debug(
+                "Iter {}: not converged, n_sw={} | max_dT/T={:.4f} (tol={}) R2={:.4f} (need>=0.8)"
+                " | acc_rates: min={:.3f} mean={:.3f} max={:.3f}"
+                " | T=[{}]",
+                iteration,
+                n_sw,
+                max_rel,
+                tol,
+                r2,
+                float(np.min(acc_rates)),
+                float(np.mean(acc_rates)),
+                float(np.max(acc_rates)),
+                ", ".join(f"{t:.4f}" for t in self.temps),
+            )
+
+            n_sw *= 2
 
             # Reset histograms by resetting labels
             self.labels = [_core.LABEL_NONE] * M
