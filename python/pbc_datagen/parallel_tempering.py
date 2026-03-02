@@ -10,6 +10,7 @@ The hot inner loop (sweep + exchange + histograms) lives in C++
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Union
 
 import numpy as np
@@ -18,6 +19,7 @@ from scipy import stats
 
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int_multi
+from pbc_datagen.io import SnapshotWriter, write_param_attrs
 
 # Union of all model types — mypy needs this to see set_temperature etc.
 Model = Union[_core.IsingModel, _core.BlumeCapelModel, _core.AshkinTellerModel]
@@ -467,3 +469,106 @@ class PTEngine:
             f"replicas or a narrower T range."
         )
         raise RuntimeError(msg)
+
+    def produce(
+        self,
+        path: str | Path,
+        n_snapshots: int = 100,
+        seed_history: list[tuple[int, int]] | None = None,
+    ) -> None:
+        """Phase C: harvest decorrelated snapshots and stream to HDF5.
+
+        Runs ``max(1, round(3 × τ_max))`` PT rounds between each snapshot
+        harvest.  Each harvest reads spins + observables from every T slot
+        and appends them to the HDF5 file.
+
+        Resume-safe: if *path* already contains snapshots, only the
+        remaining ``n_snapshots - n_existing`` are collected.
+
+        Args:
+            path: Output HDF5 file path.
+            n_snapshots: Target total snapshots per T slot.
+            seed_history: PRNG audit trail.  Defaults to ``[(0, self.seed)]``
+                for a fresh run.  On resume the orchestrator passes the
+                extended history from ``read_resume_state()``.
+
+        Raises:
+            RuntimeError: If tau_max is not set (equilibrate() not called).
+        """
+        if self.tau_max is None:
+            msg = "tau_max not set — call equilibrate() before produce()"
+            raise RuntimeError(msg)
+
+        if seed_history is None:
+            seed_history = [(0, self.seed)]
+
+        M = self.n_replicas
+        L = self.L
+
+        # Channel count: AT has 2 spin layers (σ, τ), others have 1
+        C = 2 if self.model_type == "ashkin_teller" else 1
+        obs_names = list(self.replicas[0].observables().keys())
+
+        # Thinning: at least 1 round between snapshots
+        thinning = max(1, round(3 * self.tau_max))
+
+        with SnapshotWriter(path) as writer:
+            # Create T slots only if they don't already exist
+            first_key = f"T={self.temps[0]}"
+            if first_key not in writer._file:
+                for T in self.temps:
+                    writer.create_temperature_slot(T=T, L=L, C=C, obs_names=obs_names)
+
+            # Count existing snapshots (all T slots are in lockstep)
+            n_existing = writer._file[first_key]["snapshots"].shape[0]
+            n_remaining = n_snapshots - n_existing
+            if n_remaining <= 0:
+                return
+
+            # Main production loop — collect only the remaining snapshots
+            for _ in range(n_remaining):
+                # Set replica temperatures from current address map
+                for r in range(M):
+                    self.replicas[r].set_temperature(self.temps[self.r2t[r]])
+
+                # Run thinning rounds (sweep + exchange, no obs tracking)
+                self._pt_rounds(  # type: ignore[operator]
+                    self.replicas,
+                    self.temps.tolist(),
+                    self.r2t,
+                    self.t2r,
+                    self.labels,
+                    thinning,
+                    self.rng,
+                    False,
+                )
+
+                # Harvest one snapshot from every T slot
+                for t in range(M):
+                    replica = self.replicas[self.t2r[t]]
+                    T = self.temps[t]
+
+                    # Build (C, L, L) spin array
+                    if self.model_type == "ashkin_teller":
+                        spins = np.stack(
+                            [replica.sigma, replica.tau]  # type: ignore[union-attr]
+                        ).astype(np.int8)
+                    else:
+                        spins = replica.spins[np.newaxis].copy()  # type: ignore[union-attr]
+
+                    obs = replica.observables()
+                    writer.append_snapshot(T=T, spins=spins, obs_dict=obs)
+
+        # Write campaign metadata
+        write_param_attrs(
+            path,
+            model_type=self.model_type,
+            L=L,
+            param_value=self.param_value,
+            T_ladder=self.temps,
+            tau_max=self.tau_max,
+            r2t=self.r2t,
+            t2r=self.t2r,
+            seed=self.seed,
+            seed_history=seed_history,
+        )

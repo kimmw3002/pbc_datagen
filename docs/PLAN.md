@@ -72,18 +72,18 @@ Three-phase pipeline per Hamiltonian parameter value. Parallelism across param v
 `python/pbc_datagen/autocorrelation.py` — `acf_fft()`, `tau_int()`, `tau_int_multi()`.
 Tests: `tests/test_autocorrelation.py` (7 tests).
 
-### 2.1 Parallel Tempering Orchestration ✅ (Phase A+B), 🔄 (Phase C)
+### 2.1 Parallel Tempering Orchestration ✅
 
 `python/pbc_datagen/parallel_tempering.py`
 
 - [x] Step 2.1.1: `PTEngine.__init__` — geometric T ladder, model factory, address maps, C++ function dispatch
 - [x] Step 2.1.2: `tune_ladder()` — Phase A: KTH feedback (smoothed df/dT → η → CDF inversion), doubling N_sw, damped update, convergence check (T stability + f(T) linearity R²>0.99), post-tuning acceptance rate safety
 - [x] Step 2.1.3: `equilibrate()` — Phase B: locked ladder, doubling Welch t-test (Bonferroni-corrected), τ_int measurement via `tau_int_multi` on last 80% of converged batch
-- [ ] Step 2.1.4: `produce()` — Phase C: snapshot harvesting loop, call `pt_rounds()` for `3×τ_max` rounds between snapshots, read spins + observables from `replicas[t2r[t]]`, stream to HDF5
+- [x] Step 2.1.4: `produce()` — Phase C: snapshot harvesting loop, call `pt_rounds()` for `3×τ_max` rounds between snapshots, read spins + observables from `replicas[t2r[t]]`, stream to HDF5, resume-safe
 
 Pure helper functions: `kth_redistribute()`, `kth_check_convergence()`, `welch_equilibration_check()`.
 
-Tests: `tests/test_parallel_tempering.py` (15 tests: 4 KTH math, 3 convergence, 2 tune_ladder integration, 3 Welch check, 3 equilibrate).
+Tests: `tests/test_parallel_tempering.py` (15 tests: 4 KTH math, 3 convergence, 2 tune_ladder integration, 3 Welch check, 3 equilibrate), `tests/test_produce.py` (14 tests: 1 precondition, 4 layout, 2 integrity, 3 metadata, 4 resume).
 
 #### Phase C — Production
 
