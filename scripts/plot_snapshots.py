@@ -1,0 +1,119 @@
+#!/usr/bin/env python
+"""Plot random snapshot samples from each temperature in an HDF5 dataset."""
+
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+
+import h5py
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import BoundaryNorm, ListedColormap
+
+
+def parse_temperature(group_name: str) -> float:
+    """Extract temperature value from group name like 'T=0.5'."""
+    m = re.match(r"T=([\d.eE+\-]+)", group_name)
+    if m is None:
+        raise ValueError(f"Cannot parse temperature from group name: {group_name}")
+    return float(m.group(1))
+
+
+# Discrete colormap for Ising/Blume-Capel: -1=blue, 0=white, +1=red
+CMAP_3STATE = ListedColormap(["#2166ac", "#f7f7f7", "#b2182b"])
+NORM_3STATE = BoundaryNorm([-1.5, -0.5, 0.5, 1.5], CMAP_3STATE.N)
+
+# Discrete colormap for Ashkin-Teller layers: -1=blue, +1=red
+CMAP_2STATE = ListedColormap(["#2166ac", "#b2182b"])
+NORM_2STATE = BoundaryNorm([-1.5, 0, 1.5], CMAP_2STATE.N)
+
+
+def plot_single_channel(axes: np.ndarray, snapshots: np.ndarray, indices: list[int]) -> None:
+    """Plot C=1 snapshots (Ising/BC) as a single row of images."""
+    for col, idx in enumerate(indices):
+        ax = axes[col] if axes.ndim == 1 else axes[0, col]
+        ax.imshow(snapshots[idx, 0], cmap=CMAP_3STATE, norm=NORM_3STATE, interpolation="nearest")
+        ax.set_title(f"#{idx}", fontsize=8)
+        ax.axis("off")
+
+
+def plot_two_channel(axes: np.ndarray, snapshots: np.ndarray, indices: list[int]) -> None:
+    """Plot C=2 snapshots (AT) as three rows: sigma, tau, sigma*tau."""
+    for col, idx in enumerate(indices):
+        ax_s = axes[0, col]
+        ax_t = axes[1, col]
+        ax_st = axes[2, col]
+        sigma = snapshots[idx, 0]
+        tau = snapshots[idx, 1]
+        ax_s.imshow(sigma, cmap=CMAP_2STATE, norm=NORM_2STATE, interpolation="nearest")
+        ax_t.imshow(tau, cmap=CMAP_2STATE, norm=NORM_2STATE, interpolation="nearest")
+        ax_st.imshow(sigma * tau, cmap=CMAP_2STATE, norm=NORM_2STATE, interpolation="nearest")
+        ax_s.set_title(f"#{idx}", fontsize=8)
+        ax_s.axis("off")
+        ax_t.axis("off")
+        ax_st.axis("off")
+        if col == 0:
+            ax_s.set_ylabel("σ", fontsize=10)
+            ax_t.set_ylabel("τ", fontsize=10)
+            ax_st.set_ylabel("στ", fontsize=10)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Plot snapshot samples from HDF5 dataset")
+    parser.add_argument("hdf5", type=Path, help="Path to HDF5 file")
+    parser.add_argument("--n", type=int, default=10, help="Snapshots per temperature (default: 10)")
+    parser.add_argument(
+        "-o", "--output-dir", type=Path, default=Path("images"), help="Output directory"
+    )
+    parser.add_argument("--seed", type=int, default=42, help="RNG seed")
+    parser.add_argument("--no-show", action="store_true", help="Skip plt.show()")
+    args = parser.parse_args()
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(args.seed)
+
+    with h5py.File(args.hdf5, "r") as f:
+        model_type = f.attrs["model_type"]
+        L = f.attrs["L"]
+        param_value = f.attrs["param_value"]
+
+        t_groups = sorted(
+            [(parse_temperature(name), name) for name in f if name.startswith("T=")],
+            key=lambda x: x[0],
+        )
+
+        for T_val, gname in t_groups:
+            snaps = f[gname]["snapshots"]
+            N, C, _, _ = snaps.shape
+            n_pick = min(args.n, N)
+            indices = sorted(rng.choice(N, size=n_pick, replace=False).tolist())
+
+            # Read selected snapshots into memory
+            snap_data = snaps[:]  # full read; datasets are small enough
+
+            if C == 1:
+                ncols = n_pick
+                fig, axes = plt.subplots(1, ncols, figsize=(1.5 * ncols, 2), squeeze=False)
+                plot_single_channel(axes[0], snap_data, indices)
+            else:
+                ncols = n_pick
+                fig, axes = plt.subplots(3, ncols, figsize=(1.5 * ncols, 4.5), squeeze=False)
+                plot_two_channel(axes, snap_data, indices)
+
+            fig.suptitle(f"{model_type} L={L} param={param_value}  T={T_val:.4f}", fontsize=11)
+            fig.tight_layout()
+
+            out_path = args.output_dir / f"{args.hdf5.stem}_T={T_val:.4f}.png"
+            fig.savefig(out_path, dpi=150, bbox_inches="tight")
+            print(f"Saved → {out_path}")
+            plt.close(fig)
+
+    if not args.no_show:
+        # Re-show isn't practical after close; just inform user
+        print(f"\nAll snapshots saved to {args.output_dir}/")
+
+
+if __name__ == "__main__":
+    main()

@@ -111,6 +111,10 @@ def main(argv: list[str] | None = None) -> None:
             console.print(f"[bold red]Error:[/] --params is required for {args.model}.")
             raise SystemExit(1)
 
+    # Snap T values to 4 decimal places so filename and simulation always
+    # agree.  Sub-0.0001 temperature precision is never physically meaningful.
+    args.T_range = [round(t, 4) for t in args.T_range]
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

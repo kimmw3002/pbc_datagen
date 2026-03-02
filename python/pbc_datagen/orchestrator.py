@@ -70,21 +70,24 @@ def find_existing_hdf5(
     model_type: str,
     L: int,
     param_value: float,
+    T_range: tuple[float, float],
+    n_replicas: int,
 ) -> Path | None:
-    """Find the most recent HDF5 file for this (model, L, param) combo.
+    """Find the most recent HDF5 file for this exact config.
 
-    For models with a tunable parameter (BC, AT), globs for
-    ``{model}_L{L}_{label}={param:.4f}_*.h5``.
-    For Ising (no tunable parameter), globs for ``{model}_L{L}_*.h5``.
+    The glob encodes model, L, param (if any), T-range, and replica
+    count so that a re-run with different T-range or n_replicas does
+    not accidentally resume an incompatible file.
 
     Returns the newest match (by timestamp suffix), or None if no match.
     """
     directory = Path(output_dir)
     label = _param_label(model_type)
+    T_seg = f"T={T_range[0]:.4f}-{T_range[1]:.4f}_R{n_replicas}"
     if label is not None:
-        pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_*.h5"
+        pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_{T_seg}_*.h5"
     else:
-        pattern = f"{model_type}_L{L}_*.h5"
+        pattern = f"{model_type}_L{L}_{T_seg}_*.h5"
 
     matches = sorted(directory.glob(pattern))
     if not matches:
@@ -123,7 +126,11 @@ def run_campaign(
     directory.mkdir(parents=True, exist_ok=True)
     label = _param_label(model_type)
 
-    existing = None if force_new else find_existing_hdf5(directory, model_type, L, param_value)
+    existing = (
+        None
+        if force_new
+        else find_existing_hdf5(directory, model_type, L, param_value, T_range, n_replicas)
+    )
 
     if existing is not None:
         # --- Resume path ---
@@ -161,10 +168,11 @@ def run_campaign(
         # --- Fresh start ---
         ts = int(time.time() * 1000)
         seed = ts % (2**63)
+        T_seg = f"T={T_range[0]:.4f}-{T_range[1]:.4f}_R{n_replicas}"
         if label is not None:
-            filename = f"{model_type}_L{L}_{label}={param_value:.4f}_{ts}.h5"
+            filename = f"{model_type}_L{L}_{label}={param_value:.4f}_{T_seg}_{ts}.h5"
         else:
-            filename = f"{model_type}_L{L}_{ts}.h5"
+            filename = f"{model_type}_L{L}_{T_seg}_{ts}.h5"
         path = directory / filename
         logger.info("Fresh campaign: {}", filename)
 

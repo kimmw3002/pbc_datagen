@@ -103,15 +103,15 @@ Top-level coordinator. Each Hamiltonian parameter value (D, U, etc.) runs an
 independent PT campaign — embarrassingly parallel across `max_workers` cores.
 
 ```python
-def find_existing_hdf5(output_dir, model_type, L, param_value):
-    """Find the most recent HDF5 file for this (model, L, param) combo."""
-    # Glob for matching files, sort by timestamp suffix, return newest or None
-    # Ising has no tunable param — label is None
+def find_existing_hdf5(output_dir, model_type, L, param_value, T_range, n_replicas):
+    """Find the most recent HDF5 file for this exact config."""
+    # Glob encodes model, L, param, T-range, and replica count
     label = _param_label(model_type)  # "D", "U", or None
+    T_seg = f"T={T_range[0]:.4f}-{T_range[1]:.4f}_R{n_replicas}"
     if label is not None:
-        pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_*.h5"
+        pattern = f"{model_type}_L{L}_{label}={param_value:.4f}_{T_seg}_*.h5"
     else:
-        pattern = f"{model_type}_L{L}_*.h5"
+        pattern = f"{model_type}_L{L}_{T_seg}_*.h5"
     ...
 
 def run_campaign(model_type, L, param_value, T_range, n_replicas,
@@ -157,7 +157,7 @@ models internally. Workers receive scalar arguments only.
 
 **Seed history:** HDF5 attr `seed_history: list[(int, int)]` — each entry is `(n_snapshots_at_start, seed)`. First entry is `(0, initial_seed)`. Each resume appends `(n_existing_snapshots, derived_seed)`. Enables full replay of which seed produced which snapshots.
 
-**File naming:** `{model_type}_L{L}_{label}={param:.4f}_{timestamp_ms}.h5` for BC/AT. Ising has no tunable parameter: `ising_L{L}_{timestamp_ms}.h5`.
+**File naming:** `{model_type}_L{L}_{label}={param:.4f}_T={Tmin:.4f}-{Tmax:.4f}_R{n_replicas}_{timestamp_ms}.h5` for BC/AT. Ising has no tunable parameter: `ising_L{L}_T={Tmin:.4f}-{Tmax:.4f}_R{n_replicas}_{timestamp_ms}.h5`. T-range and replica count are encoded in the filename so `find_existing_hdf5` only matches files with the exact same config.
 
 #### Resume
 
@@ -273,9 +273,9 @@ Validation and diagnostics will be done by hand, not via automated tests.
 
 ### Phase 2 Tests — Orchestrator (`tests/test_orchestrator.py`) ✅
 
-13 tests: `TestFindExistingHdf5` (4), `TestDeriveSeed` (2), `TestRunCampaign` (3), `TestRunCampaignResume` (4).
+15 tests: `TestFindExistingHdf5` (6), `TestDeriveSeed` (2), `TestRunCampaign` (3), `TestRunCampaignResume` (4).
 
-- [x] Unit: `find_existing_hdf5` returns newest match, ignores wrong model/L
+- [x] Unit: `find_existing_hdf5` returns newest match, ignores wrong model/L/T_range/n_replicas
 - [x] Unit: `_derive_seed` is deterministic, differs with offset
 - [x] Integration: fresh campaign creates HDF5 with correct layout and filename
 - [x] Integration: resume reuses file, appends to target, extends seed history

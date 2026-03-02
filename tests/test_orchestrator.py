@@ -47,23 +47,27 @@ class TestFindExistingHdf5:
         """No matching files in the directory → returns None."""
         from pbc_datagen.orchestrator import find_existing_hdf5
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
+        result = find_existing_hdf5(
+            tmp_path, "ising", L=4, param_value=0.0, T_range=(2.0, 2.1), n_replicas=3
+        )
         assert result is None
 
     def test_returns_newest_matching_file(self, tmp_path: Path) -> None:
         """Two files with different timestamps → returns the one with
         the larger (newer) timestamp suffix.
 
-        Ising has no param segment: ``ising_L4_{timestamp_ms}.h5``.
+        Ising filename: ``ising_L4_T=2.0000-2.1000_R3_{timestamp}.h5``.
         """
         from pbc_datagen.orchestrator import find_existing_hdf5
 
-        old = tmp_path / "ising_L4_1000000000000.h5"
-        new = tmp_path / "ising_L4_2000000000000.h5"
+        old = tmp_path / "ising_L4_T=2.0000-2.1000_R3_1000000000000.h5"
+        new = tmp_path / "ising_L4_T=2.0000-2.1000_R3_2000000000000.h5"
         _touch_hdf5(old)
         _touch_hdf5(new)
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
+        result = find_existing_hdf5(
+            tmp_path, "ising", L=4, param_value=0.0, T_range=(2.0, 2.1), n_replicas=3
+        )
         assert result is not None
         assert result.name == new.name
 
@@ -74,10 +78,12 @@ class TestFindExistingHdf5:
         """
         from pbc_datagen.orchestrator import find_existing_hdf5
 
-        wrong = tmp_path / "blume_capel_L4_D=0.0000_9999999999999.h5"
+        wrong = tmp_path / "blume_capel_L4_D=0.0000_T=2.0000-2.1000_R3_9999999999999.h5"
         _touch_hdf5(wrong)
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
+        result = find_existing_hdf5(
+            tmp_path, "ising", L=4, param_value=0.0, T_range=(2.0, 2.1), n_replicas=3
+        )
         assert result is None
 
     def test_ignores_wrong_lattice_size(self, tmp_path: Path) -> None:
@@ -87,10 +93,36 @@ class TestFindExistingHdf5:
         """
         from pbc_datagen.orchestrator import find_existing_hdf5
 
-        wrong = tmp_path / "ising_L8_9999999999999.h5"
+        wrong = tmp_path / "ising_L8_T=2.0000-2.1000_R3_9999999999999.h5"
         _touch_hdf5(wrong)
 
-        result = find_existing_hdf5(tmp_path, "ising", L=4, param_value=0.0)
+        result = find_existing_hdf5(
+            tmp_path, "ising", L=4, param_value=0.0, T_range=(2.0, 2.1), n_replicas=3
+        )
+        assert result is None
+
+    def test_ignores_different_T_range(self, tmp_path: Path) -> None:
+        """A file with a different T-range should not match."""
+        from pbc_datagen.orchestrator import find_existing_hdf5
+
+        wrong = tmp_path / "ising_L4_T=1.0000-3.0000_R3_9999999999999.h5"
+        _touch_hdf5(wrong)
+
+        result = find_existing_hdf5(
+            tmp_path, "ising", L=4, param_value=0.0, T_range=(2.0, 2.1), n_replicas=3
+        )
+        assert result is None
+
+    def test_ignores_different_n_replicas(self, tmp_path: Path) -> None:
+        """A file with a different replica count should not match."""
+        from pbc_datagen.orchestrator import find_existing_hdf5
+
+        wrong = tmp_path / "ising_L4_T=2.0000-2.1000_R10_9999999999999.h5"
+        _touch_hdf5(wrong)
+
+        result = find_existing_hdf5(
+            tmp_path, "ising", L=4, param_value=0.0, T_range=(2.0, 2.1), n_replicas=3
+        )
         assert result is None
 
 
@@ -156,11 +188,10 @@ class TestRunCampaign:
                 assert f[g]["snapshots"].shape[0] == 3
 
     def test_output_filename_matches_convention(self, tmp_path: Path) -> None:
-        """Ising output file: {model}_L{L}_{ts}.h5 (no param segment).
+        """Ising output file encodes T-range and replica count.
 
-        The timestamp portion is variable, but the prefix must match
-        the campaign parameters exactly.  Ising has no tunable
-        Hamiltonian parameter, so no ``J=`` appears in the filename.
+        Format: ``ising_L4_T=2.0000-2.1000_R3_{ts}.h5``.
+        No ``J=`` appears because Ising has no tunable parameter.
         """
         from pbc_datagen.orchestrator import run_campaign
 
@@ -175,7 +206,7 @@ class TestRunCampaign:
         )
 
         name = result_path.name
-        assert name.startswith("ising_L4_")
+        assert name.startswith("ising_L4_T=2.0000-2.1000_R3_")
         assert "J=" not in name
         assert name.endswith(".h5")
 
