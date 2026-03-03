@@ -73,7 +73,7 @@ def kth_redistribute(
         smoothed[i] = np.mean(raw_slopes[i - 1 : i + 2])
 
     # Clamp to positive floor to avoid zero/negative from noise
-    eps = max(float(np.median(raw_slopes)) * 0.01, 1e-6)
+    eps = max(float(np.median(raw_slopes)) * 0.10, 1e-6)
     df_dT = np.maximum(smoothed, eps)
 
     # --- Step 2: temperature density η ---
