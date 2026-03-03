@@ -196,6 +196,26 @@ class TestWelchEquilibrationCheck:
 
         assert welch_equilibration_check(obs_streams)
 
+    def test_stationary_large_n_passes(self) -> None:
+        """IID Gaussian with N=100k and 50 T-slots (150 tests) must still pass.
+
+        Regression check: with large N the standard error shrinks, but for
+        truly IID data the p-values should stay uniformly distributed and
+        Bonferroni should hold.  Mirrors the production setup (3 obs × 50 T).
+        """
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        rng = np.random.default_rng(314)
+        M = 50  # temperature slots — same as production
+        N = 100_000
+        obs_streams: dict[str, list[list[float]]] = {
+            "energy": [rng.normal(0, 1, N).tolist() for _ in range(M)],
+            "abs_m": [rng.normal(0.5, 0.1, N).tolist() for _ in range(M)],
+            "m": [rng.normal(0, 1, N).tolist() for _ in range(M)],
+        }
+
+        assert welch_equilibration_check(obs_streams)
+
     def test_drifting_fails(self) -> None:
         """A strong linear drift should fail — means are clearly different."""
         from pbc_datagen.parallel_tempering import welch_equilibration_check
@@ -276,6 +296,37 @@ class TestWelchEquilibrationCheck:
         N = 1_000
         obs_streams: dict[str, list[list[float]]] = {
             "abs_m": [[1.0] * N for _ in range(M)],
+        }
+
+        assert welch_equilibration_check(obs_streams)
+
+    def test_autocorrelated_stationary_passes(self) -> None:
+        """Autocorrelated but stationary AR(1) streams must pass.
+
+        Regression test: with phi=0.9 the integrated autocorrelation time
+        τ_int ≈ (1+φ)/(1-φ)/2 ≈ 9.5.  The raw samples are NOT independent,
+        so a naive t-test on raw data underestimates the standard error by
+        √(2τ_int) ≈ 4.4×, inflating the t-statistic and causing false
+        rejection.  The batch-means fix averages into blocks of ceil(3×τ_int)
+        before running the t-test, restoring correct coverage.
+        """
+        from pbc_datagen.parallel_tempering import welch_equilibration_check
+
+        rng = np.random.default_rng(2024)
+        M = 5  # temperature slots
+        N = 100_000
+        phi = 0.9  # τ_int ≈ 9.5
+
+        def _ar1(n: int) -> list[float]:
+            """Generate stationary AR(1): x[t] = phi*x[t-1] + eps."""
+            x = np.empty(n)
+            x[0] = rng.normal()
+            for t in range(1, n):
+                x[t] = phi * x[t - 1] + rng.normal(0, 1.0)
+            return x.tolist()
+
+        obs_streams: dict[str, list[list[float]]] = {
+            "energy": [_ar1(N) for _ in range(M)],
         }
 
         assert welch_equilibration_check(obs_streams)

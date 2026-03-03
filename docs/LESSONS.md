@@ -28,6 +28,15 @@ Hard-won insights from building this codebase. Read this before writing new code
   sum(exp)`. scipy's `chisquare` rejects this mismatch. Fix: `exp *= obs.sum() / exp.sum()`
   after filtering. The rescaling is negligible (< 0.001%) and keeps the test valid.
 
+- **Welch t-test on raw MCMC samples = inflated false-positive rate.** `ttest_ind`
+  assumes independence, but MCMC chains have autocorrelation time τ_int. The standard
+  error is underestimated by √(2τ_int), inflating the t-statistic. With Bonferroni
+  over 150 tests (3 obs × 50 T-slots), the per-test false-positive rate exceeds 50%
+  for τ_int ≈ 10, making overall rejection near-certain. Fix: estimate τ_int from
+  the series, average into blocks of `ceil(3×τ_int)`, then run `ttest_ind` on the
+  approximately-independent block means. IID data gets block_size ≈ 2 (thousands of
+  blocks, no power loss); drifting data gets huge τ → 0 blocks → correct rejection.
+
 - **Welch t-test + near-constant observables = catastrophic cancellation.** At low T,
   observables like `abs_m_baxter` saturate to ~1.0 with only float-noise variance (~1e-30).
   If the first/last 20% segments have a tiny systematic offset (e.g., 1e-15 from warmup),

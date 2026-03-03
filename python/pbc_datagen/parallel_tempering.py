@@ -21,7 +21,7 @@ from loguru import logger
 from scipy import stats
 
 import pbc_datagen._core as _core
-from pbc_datagen.autocorrelation import tau_int_multi
+from pbc_datagen.autocorrelation import tau_int, tau_int_multi
 from pbc_datagen.io import SnapshotWriter, write_param_attrs
 
 # Union of all model types — mypy needs this to see set_temperature etc.
@@ -200,9 +200,33 @@ def welch_equilibration_check(
             if std_f < tol and std_l < tol:
                 continue  # trivially stationary
 
+            # --- Batch means: account for autocorrelation ---
+            # Estimate τ_int from the full series so block size adapts
+            # to the actual correlation structure at this (obs, T_slot).
+            tau = tau_int(np.asarray(series, dtype=np.float64))
+            block_size = max(1, math.ceil(3 * tau))
+
+            n_blocks_first = len(first_arr) // block_size
+            n_blocks_last = len(last_arr) // block_size
+            if min(n_blocks_first, n_blocks_last) < 10:
+                # Not enough independent blocks for a reliable t-test
+                return False
+
+            # Average into approximately-independent block means
+            first_blocks = (
+                first_arr[: n_blocks_first * block_size]
+                .reshape(n_blocks_first, block_size)
+                .mean(axis=1)
+            )
+            last_blocks = (
+                last_arr[: n_blocks_last * block_size]
+                .reshape(n_blocks_last, block_size)
+                .mean(axis=1)
+            )
+
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                _, p_value = stats.ttest_ind(first, last, equal_var=False)
+                _, p_value = stats.ttest_ind(first_blocks, last_blocks, equal_var=False)
             for w in caught:
                 logger.warning(
                     "Welch t-test numerical warning for obs={} T_slot={}: {}",
@@ -211,9 +235,10 @@ def welch_equilibration_check(
                     str(w.message),
                 )
             # Belt-and-suspenders: treat NaN p-value as passing
-            if math.isnan(p_value):
+            p = float(p_value)  # type: ignore[arg-type]  # scipy stubs
+            if math.isnan(p):
                 continue
-            if p_value < threshold:
+            if p < threshold:
                 return False
 
     return True
