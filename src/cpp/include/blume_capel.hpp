@@ -53,6 +53,13 @@ struct BlumeCapelModel {
     //   D = 0 → pure Ising limit
     void set_crystal_field(double D);
 
+    // Uniform parameter interface for 2D PT (delegates to set_crystal_field).
+    void set_param(double p) { set_crystal_field(p); }
+
+    // dE/dD = Σ s_i²  (coefficient of D in the energy).
+    // Used by pt_exchange_param for param-direction exchanges.
+    double dE_dparam() const { return static_cast<double>(cached_sq_sum_); }
+
     // Set an individual spin (for testing / manual configuration).
     // value must be -1, 0, or +1.
     void set_spin(int site, int8_t value);

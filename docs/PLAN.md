@@ -266,26 +266,40 @@ replicas around the first-order line endpoint.
 
 ### 3.2 — 2D Grid & Exchange
 
-True 2D grid: `n_T × n_D` replicas, `slot(i,j) = i*n_D + j`.
+True 2D grid: `n_T × n_param` replicas, `slot(i,j) = i*n_param + j`.
 
 - T spacing: geometric
-- D spacing: linear
-- Alternating T-direction and D-direction exchange rounds
+- Param spacing: linear (D for BC, U for AT)
+- Alternating T-direction and param-direction exchange rounds
 
-2D exchange criterion:
+**Param-direction exchange criterion** (same T, different param):
 
 ```
-Δ = (β_j − β_i)(E_a − E_b) + (D_j − D_i)(β_j·SqSum_a − β_i·SqSum_b)
+Δ = β × (param_i − param_j) × (dE/dp_i − dE/dp_j)
 ```
 
-Reduces to standard 1D criterion when `D_i = D_j`.
-For AT: analogous with U and four-spin sum.
+where `dE/dp` is the derivative of energy w.r.t. the Hamiltonian parameter:
+- BC:  `dE/dD = Σ s_i²` (= `cached_sq_sum_`)
+- AT:  `dE/dU = −cached_four_spin_`
 
-- [ ] Step 3.2.1: `PTEngine2D.__init__` — 2D grid construction, replica allocation
-- [ ] Step 3.2.2: `pt_exchange_2d()` — C++ exchange with 2D criterion
-- [ ] Step 3.2.3: `pt_exchange_round_2d()` — alternating T/D direction rounds
-- [ ] Step 3.2.4: `pt_rounds_2d()` — composition loop for 2D grid
-- [ ] Step 3.2.5: Tests: detailed balance for 2D exchange, reduces to 1D when D constant
+T-direction exchanges reuse existing `pt_exchange()` (same param, different T).
+
+**C++ `pt_rounds_2d`** — full 2D PT loop in C++, mirroring the 1D `pt_rounds`:
+- Sweep all M replicas (OpenMP parallel, set each replica's T and param from its slot)
+- T-direction exchange sweep (within each param column, using `pt_exchange`)
+- Param-direction exchange sweep (within each T row, using `pt_exchange_param`)
+- Observable collection, label tracking, histogram accumulation — all in C++
+- Bound as `pt_rounds_2d_bc` / `pt_rounds_2d_at` via pybind11
+
+**Model additions:**
+- BC: `dE_dparam()` method → returns `cached_sq_sum_` (int → double)
+- AT: `dE_dparam()` method → returns `−cached_four_spin_` (int → double)
+
+- [x] Step 3.2.1: Add `dE_dparam()` and `set_param()` methods to BC and AT model structs
+- [x] Step 3.2.2: `pt_exchange_param()` — C++ param-direction exchange criterion
+- [x] Step 3.2.3: `pt_rounds_2d()` — C++ composition loop for 2D grid (sweep + T-exchange + param-exchange + obs collection). Returns `PT2DResult` (not `PTResult` — no 1D label tracking artifacts).
+- [x] Step 3.2.4: pybind11 bindings for `pt_exchange_param`, `pt_rounds_2d_bc`, `pt_rounds_2d_at`
+- [x] Step 3.2.5: Tests: unit tests for `pt_exchange_param` (3 tests) + 2×2 detailed balance on 2D grid for BC (D<1) and AT (U<1, U>1) (5 integration tests)
 
 ### 3.3 — Phase A: Spectral Connectivity Check
 
@@ -440,3 +454,13 @@ Validation and diagnostics will be done by hand, not via automated tests.
 - [x] Unit: `_derive_seed` is deterministic, differs with offset
 - [x] Integration: fresh campaign creates HDF5 with correct layout and filename
 - [x] Integration: resume reuses file, appends to target, extends seed history
+
+### Phase 3 Tests — 2D PT Exchange (`tests/test_pt_2d_exchange.py`) 🚧
+
+8 tests: `TestPtExchangeParam` (3), `TestPt2dDetailedBalanceBlumeCapel` (2 integration), `TestPt2dDetailedBalanceAshkinTeller` (3 integration).
+
+- [ ] Unit: `pt_exchange_param` — same param always accepts (Δ=0)
+- [ ] Unit: `pt_exchange_param` — large favorable Δ always accepts
+- [ ] Unit: `pt_exchange_param` — acceptance rate matches exp(Δ) statistically
+- [ ] Integration: BC 2×2 on T×D grid (D=0.0–0.5, D=0.3–0.8), chi-squared vs exact P(E)
+- [ ] Integration: AT 2×2 on T×U grid (U=0.0–0.5, U=0.5–1.5, U=1.0–1.5), chi-squared vs exact P(E)

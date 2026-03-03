@@ -58,6 +58,13 @@ struct AshkinTellerModel {
     // Automatically sets remapped_ = (U > 1).
     void set_four_spin_coupling(double U);
 
+    // Uniform parameter interface for 2D PT (delegates to set_four_spin_coupling).
+    void set_param(double p) { set_four_spin_coupling(p); }
+
+    // dE/dU = −cached_four_spin_  (coefficient of U in the energy is −four_spin).
+    // Used by pt_exchange_param for param-direction exchanges.
+    double dE_dparam() const { return static_cast<double>(-cached_four_spin_); }
+
     // Set an individual σ spin (for testing / manual configuration).
     // value must be +1 or -1.
     void set_sigma(int site, int8_t value);

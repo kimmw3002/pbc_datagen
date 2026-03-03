@@ -224,6 +224,15 @@ PYBIND11_MODULE(_core, m) {
           "Single-gap Metropolis exchange decision.\n"
           "Returns True (accept) or False (reject).");
 
+    m.def("pt_exchange_param", &pbc::pt_exchange_param,
+          py::arg("dEdp_i"), py::arg("dEdp_j"),
+          py::arg("T"),
+          py::arg("param_i"), py::arg("param_j"),
+          py::arg("rng"),
+          "Param-direction exchange at fixed temperature.\n"
+          "delta = beta * (param_i - param_j) * (dEdp_i - dEdp_j).\n"
+          "Returns True (accept) or False (reject).");
+
     // pybind11's automatic STL conversion copies Python lists into temporary
     // C++ vectors — mutations inside C++ would be lost.  These lambdas
     // manually copy int lists → vectors, call the C++ function, then write
@@ -512,6 +521,80 @@ PYBIND11_MODULE(_core, m) {
         },
         py::arg("replicas"), py::arg("temps"),
         py::arg("r2t"), py::arg("t2r"), py::arg("labels"),
+        py::arg("n_rounds"), py::arg("rng"),
+        py::arg("track_observables"));
+
+    // Helper: convert PT2DResult to a Python dict.
+    // Only contains obs_streams — no 1D label tracking artifacts.
+    auto pt_2d_result_to_dict = [](const pbc::PT2DResult& res) {
+        py::dict out;
+        py::dict streams;
+        for (auto& [name, slots] : res.obs_streams) {
+            py::list slot_list;
+            for (auto& s : slots)
+                slot_list.append(py::cast(s));
+            streams[py::cast(name)] = slot_list;
+        }
+        out["obs_streams"] = streams;
+        return out;
+    };
+
+    // --- pt_rounds_2d: 2D parameter-space PT (BC and AT only) ----------------
+    m.def("pt_rounds_2d_bc",
+        [list_to_ivec, ivec_to_list, pt_2d_result_to_dict](
+            py::list py_replicas,
+            std::vector<double> temps, std::vector<double> params,
+            py::list py_r2s, py::list py_s2r,
+            int n_rounds,
+            pbc::Rng& rng, bool track_obs) {
+            std::vector<pbc::BlumeCapelModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::BlumeCapelModel*>());
+            auto r2s = list_to_ivec(py_r2s);
+            auto s2r = list_to_ivec(py_s2r);
+
+            pbc::PT2DResult res;
+            {
+                py::gil_scoped_release release;
+                res = pbc::pt_rounds_2d(reps, temps, params, r2s, s2r,
+                                        n_rounds, rng, track_obs);
+            }
+
+            ivec_to_list(r2s, py_r2s);
+            ivec_to_list(s2r, py_s2r);
+            return pt_2d_result_to_dict(res);
+        },
+        py::arg("replicas"), py::arg("temps"), py::arg("params"),
+        py::arg("r2s"), py::arg("s2r"),
+        py::arg("n_rounds"), py::arg("rng"),
+        py::arg("track_observables"));
+
+    m.def("pt_rounds_2d_at",
+        [list_to_ivec, ivec_to_list, pt_2d_result_to_dict](
+            py::list py_replicas,
+            std::vector<double> temps, std::vector<double> params,
+            py::list py_r2s, py::list py_s2r,
+            int n_rounds,
+            pbc::Rng& rng, bool track_obs) {
+            std::vector<pbc::AshkinTellerModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::AshkinTellerModel*>());
+            auto r2s = list_to_ivec(py_r2s);
+            auto s2r = list_to_ivec(py_s2r);
+
+            pbc::PT2DResult res;
+            {
+                py::gil_scoped_release release;
+                res = pbc::pt_rounds_2d(reps, temps, params, r2s, s2r,
+                                        n_rounds, rng, track_obs);
+            }
+
+            ivec_to_list(r2s, py_r2s);
+            ivec_to_list(s2r, py_s2r);
+            return pt_2d_result_to_dict(res);
+        },
+        py::arg("replicas"), py::arg("temps"), py::arg("params"),
+        py::arg("r2s"), py::arg("s2r"),
         py::arg("n_rounds"), py::arg("rng"),
         py::arg("track_observables"));
 }

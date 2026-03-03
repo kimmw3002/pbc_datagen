@@ -15,6 +15,13 @@ class PTResult(TypedDict):
     round_trip_count: int
     obs_streams: dict[str, list[list[float]]]
 
+class PT2DResult(TypedDict):
+    # r2s, s2r are mutated in-place on the Python lists passed
+    # to pt_rounds_2d — they are NOT in this dict.
+    # No 1D label tracking (n_up/n_down/round_trip_count) — the 2D grid
+    # has no single cold→hot axis for those diagnostics to apply.
+    obs_streams: dict[str, list[list[float]]]
+
 class Rng:
     def __init__(self, seed: int) -> None: ...
     def uniform(self) -> float: ...
@@ -103,6 +110,14 @@ class AshkinTellerModel:
 # --- PT engine: non-templated ------------------------------------------------
 
 def pt_exchange(E_i: float, E_j: float, T_i: float, T_j: float, rng: Rng) -> bool: ...
+def pt_exchange_param(
+    dEdp_i: float,
+    dEdp_j: float,
+    T: float,
+    param_i: float,
+    param_j: float,
+    rng: Rng,
+) -> bool: ...
 
 LABEL_NONE: int
 LABEL_UP: int
@@ -189,3 +204,26 @@ def pt_rounds_at(
     rng: Rng,
     track_observables: bool,
 ) -> PTResult: ...
+
+# --- PT engine: 2D parameter-space (BC/AT only) --------------------------------
+
+def pt_rounds_2d_bc(
+    replicas: list[BlumeCapelModel],
+    temps: list[float],
+    params: list[float],
+    r2s: list[int],
+    s2r: list[int],
+    n_rounds: int,
+    rng: Rng,
+    track_observables: bool,
+) -> PT2DResult: ...
+def pt_rounds_2d_at(
+    replicas: list[AshkinTellerModel],
+    temps: list[float],
+    params: list[float],
+    r2s: list[int],
+    s2r: list[int],
+    n_rounds: int,
+    rng: Rng,
+    track_observables: bool,
+) -> PT2DResult: ...

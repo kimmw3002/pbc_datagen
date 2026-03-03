@@ -27,6 +27,21 @@ inline bool pt_exchange(double E_i, double E_j,
     return rng.uniform() < std::exp(delta);  // Metropolis test
 }
 
+// ── 3.2.2  pt_exchange_param ──────────────────────────────────────
+// Param-direction exchange at fixed temperature.
+// Δ = β × (param_i − param_j) × (dEdp_i − dEdp_j)
+// where dEdp = dE/d(param) for each replica:
+//   BC: dE/dD = Σ s_i²  (cached_sq_sum_)
+//   AT: dE/dU = −cached_four_spin_
+inline bool pt_exchange_param(double dEdp_i, double dEdp_j,
+                              double T,
+                              double param_i, double param_j,
+                              Rng& rng) {
+    double delta = (1.0 / T) * (param_i - param_j) * (dEdp_i - dEdp_j);
+    if (delta >= 0.0) return true;
+    return rng.uniform() < std::exp(delta);
+}
+
 // ── 1.5.2  pt_exchange_round ───────────────────────────────────────
 // Make M random swap proposals (one "round").
 //
@@ -224,6 +239,120 @@ PTResult pt_rounds(
         n_accepts, n_attempts, n_up, n_down,
         round_trip_count, std::move(obs_streams)
     };
+}
+
+// ── 3.2.3  PT2DResult — result type for 2D parameter-space PT ─────
+// Separate from PTResult because the 2D grid has no single "cold→hot"
+// axis — 1D label tracking (n_up/n_down/round_trip_count) and per-gap
+// acceptance counters (n_accepts/n_attempts) are not meaningful here.
+// Future: add per-edge acceptance rates (T-dir and param-dir separately)
+// and phase-crossing counts when those diagnostics are implemented.
+struct PT2DResult {
+    ObsStreams obs_streams;
+};
+
+// ── 3.2.4  pt_rounds_2d — 2D parameter-space PT composition loop ──
+// Same structure as pt_rounds but on an n_T × n_P 2D grid.
+//
+// Grid layout: slot(i,j) = i*n_P + j  (row = T index, col = param index)
+// Total replicas M = n_T * n_P.
+//
+// Each round:
+//   1. Sweep all M replicas at their current (T, param)  [OpenMP parallel]
+//   2. T-direction exchanges (within each param column)
+//   3. Param-direction exchanges (within each T row)
+//   4. Observable collection (if tracking)
+//
+// Model must provide set_param(double) and dE_dparam() in addition to
+// the standard set_temperature / sweep / energy / observables interface.
+template <typename Model>
+PT2DResult pt_rounds_2d(
+    std::vector<Model*>& replicas,
+    const std::vector<double>& temps,   // length n_T
+    const std::vector<double>& params,  // length n_P
+    std::vector<int>& r2s,              // replica → slot (flat)
+    std::vector<int>& s2r,              // slot → replica
+    int n_rounds,
+    Rng& rng,
+    bool track_observables)
+{
+    int n_T = static_cast<int>(temps.size());
+    int n_P = static_cast<int>(params.size());
+    int M = n_T * n_P;
+
+    ObsStreams obs_streams;
+    if (track_observables) {
+        auto obs = replicas[0]->observables();
+        for (auto& [name, _] : obs) {
+            obs_streams[name].resize(M);
+        }
+    }
+
+    for (int round = 0; round < n_rounds; ++round) {
+        // Sweep each replica at its current (T, param).
+        #pragma omp parallel for schedule(static) if(M >= 8)
+        for (int r = 0; r < M; ++r) {
+            int s = r2s[r];
+            int i_t = s / n_P;
+            int j_p = s % n_P;
+            replicas[r]->set_temperature(temps[i_t]);
+            replicas[r]->set_param(params[j_p]);
+            replicas[r]->sweep(1);
+        }
+
+        // T-direction exchanges (within each param column)
+        for (int j = 0; j < n_P; ++j) {
+            for (int i = 0; i < n_T - 1; ++i) {
+                int s_lo = i * n_P + j;
+                int s_hi = (i + 1) * n_P + j;
+                int r_lo = s2r[s_lo];
+                int r_hi = s2r[s_hi];
+                double E_lo = replicas[r_lo]->energy();
+                double E_hi = replicas[r_hi]->energy();
+                if (pt_exchange(E_lo, E_hi, temps[i], temps[i + 1], rng)) {
+                    r2s[r_lo] = s_hi;
+                    r2s[r_hi] = s_lo;
+                    s2r[s_lo] = r_hi;
+                    s2r[s_hi] = r_lo;
+                }
+            }
+        }
+
+        // Param-direction exchanges (within each T row)
+        for (int i = 0; i < n_T; ++i) {
+            for (int j = 0; j < n_P - 1; ++j) {
+                int s_lo = i * n_P + j;
+                int s_hi = i * n_P + j + 1;
+                int r_lo = s2r[s_lo];
+                int r_hi = s2r[s_hi];
+                double dEdp_lo = replicas[r_lo]->dE_dparam();
+                double dEdp_hi = replicas[r_hi]->dE_dparam();
+                if (pt_exchange_param(dEdp_lo, dEdp_hi, temps[i],
+                                      params[j], params[j + 1], rng)) {
+                    r2s[r_lo] = s_hi;
+                    r2s[r_hi] = s_lo;
+                    s2r[s_lo] = r_hi;
+                    s2r[s_hi] = r_lo;
+                }
+            }
+        }
+
+        // After exchanges, sync each replica's param to its current slot.
+        // Param-direction exchanges move replicas between D/U slots without
+        // updating their internal D_ or U_.  Energy depends on the param
+        // (BC: cached_energy_ includes D*sq_sum; AT: energy() uses U_),
+        // so we must set_param() before reading observables.
+        for (int r = 0; r < M; ++r) {
+            int j_p = r2s[r] % n_P;
+            replicas[r]->set_param(params[j_p]);
+        }
+
+        if (track_observables) {
+            pt_collect_obs(obs_streams, replicas, s2r, M);
+        }
+    }
+
+    return PT2DResult{std::move(obs_streams)};
 }
 
 }  // namespace pbc
