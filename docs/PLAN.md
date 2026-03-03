@@ -235,6 +235,21 @@ python scripts/generate_dataset.py \
 
 - [x] Step 2.4.1: argparse CLI wrapping `generate_dataset()` with all parameters + `--new` flag
 
+### 2.5 Single-Chain MCMC Runner ✅
+
+Files: `python/pbc_datagen/single_chain.py`, `scripts/generate_single.py`
+
+Simpler alternative to PTEngine for single (param, T) point — no replica management,
+no ladder tuning. Uses the same C++ `sweep()` API.
+
+- [x] Step 2.5.1: `SingleChainEngine.__init__` — model factory, store state
+- [x] Step 2.5.2: `SingleChainEngine.equilibrate()` — doubling Welch t-test + τ_int measurement
+- [x] Step 2.5.3: `SingleChainEngine.produce()` — thinned snapshot harvesting to HDF5
+- [x] Step 2.5.4: `find_existing_single_hdf5()` + `run_single_campaign()` — file discovery + resume
+- [x] Step 2.5.5: `scripts/generate_single.py` — CLI wrapper (argparse + rich panel)
+
+---
+
 ## Phase 3: Validation & Diagnostics (manual)
 
 Validation and diagnostics will be done by hand, not via automated tests.
@@ -278,4 +293,15 @@ Validation and diagnostics will be done by hand, not via automated tests.
 - [x] Unit: `find_existing_hdf5` returns newest match, ignores wrong model/L/T_range/n_replicas
 - [x] Unit: `_derive_seed` is deterministic, differs with offset
 - [x] Integration: fresh campaign creates HDF5 with correct layout and filename
+- [x] Integration: resume reuses file, appends to target, extends seed history
+
+### Phase 2 Tests — Single-Chain Runner (`tests/test_single_chain.py`) ✅
+
+23 tests: `TestSingleChainInit` (4), `TestEquilibrate` (2), `TestProduce` (4), `TestFindExistingSingleHdf5` (6), `TestRunSingleCampaign` (7).
+
+- [x] Unit: constructor creates correct model, unknown model raises
+- [x] Unit: `equilibrate()` sets positive τ_max, `produce()` before `equilibrate()` raises
+- [x] Unit: `produce()` writes correct HDF5 structure (snapshots, observables, attrs) for all 3 models
+- [x] Unit: `find_existing_single_hdf5` returns newest match, ignores wrong model/L/T
+- [x] Integration: fresh campaign creates HDF5 with correct filename and layout
 - [x] Integration: resume reuses file, appends to target, extends seed history
