@@ -235,7 +235,168 @@ python scripts/generate_dataset.py \
 
 - [x] Step 2.4.1: argparse CLI wrapping `generate_dataset()` with all parameters + `--new` flag
 
-## Phase 3: Validation & Diagnostics (manual)
+## Phase 3: 2D Parameter-Space Parallel Tempering
+
+### 3.0 — Problem Statement
+
+1D PT fails at first-order transitions. The energy gap is O(L²), exchanges are
+exponentially suppressed, and the replica ladder splits into disconnected
+ordered/disordered shelves that never mix.
+
+The first-order line is a barrier in BOTH T and D directions — a naive 2D grid
+doesn't automatically fix this. The grid must include D values below the
+tricritical point (D_tcp) so replicas can cross the transition through the
+second-order region, where no barrier exists.
+
+2D PT converts an exponential barrier into a polynomial mixing time by routing
+replicas around the first-order line endpoint.
+
+- [ ] Step 3.0.1: Document the failure mode with a 1D PT run at D near the first-order line
+
+### 3.1 — Architecture Changes
+
+- Remove Python `multiprocessing.Pool` (param-level parallelism)
+- Add OpenMP for replica-level parallelism in C++ sweep loops
+- Ising: keep 1D PT with KTH (Phases A→B→C unchanged), gains OpenMP for free
+- BC/AT: new 2D PT with three new phases (A→B→C redefined below)
+
+- [ ] Step 3.1.1: Remove `multiprocessing.Pool` and `_worker_init()` from orchestrator
+- [ ] Step 3.1.2: Add OpenMP flags to CMakeLists.txt
+- [ ] Step 3.1.3: Add `py::gil_scoped_release` to pybind11 bindings for sweep/PT functions
+
+### 3.2 — 2D Grid & Exchange
+
+True 2D grid: `n_T × n_D` replicas, `slot(i,j) = i*n_D + j`.
+
+- T spacing: geometric
+- D spacing: linear
+- Alternating T-direction and D-direction exchange rounds
+
+2D exchange criterion:
+
+```
+Δ = (β_j − β_i)(E_a − E_b) + (D_j − D_i)(β_j·SqSum_a − β_i·SqSum_b)
+```
+
+Reduces to standard 1D criterion when `D_i = D_j`.
+For AT: analogous with U and four-spin sum.
+
+- [ ] Step 3.2.1: `PTEngine2D.__init__` — 2D grid construction, replica allocation
+- [ ] Step 3.2.2: `pt_exchange_2d()` — C++ exchange with 2D criterion
+- [ ] Step 3.2.3: `pt_exchange_round_2d()` — alternating T/D direction rounds
+- [ ] Step 3.2.4: `pt_rounds_2d()` — composition loop for 2D grid
+- [ ] Step 3.2.5: Tests: detailed balance for 2D exchange, reduces to 1D when D constant
+
+### 3.3 — Phase A: Spectral Connectivity Check
+
+Run a batch of exchanges, measure acceptance rate per edge (T-gaps and D-gaps).
+Build M×M Markov transition matrix from measured acceptance rates. Compute
+spectral gap (1 − λ₂) via scipy sparse eigensolver.
+
+If spectral gap too small → grid has islands → FAIL with Fiedler vector
+diagnostic showing which (T,D) slots are isolated.
+
+This replaces naive "all gaps > 10%" which misses collective barriers and
+false-fails well-connected grids with one weak link.
+
+- [ ] Step 3.3.1: Build acceptance-rate adjacency matrix from exchange statistics
+- [ ] Step 3.3.2: Construct Markov transition matrix from adjacency
+- [ ] Step 3.3.3: Compute spectral gap via `scipy.sparse.linalg.eigsh`
+- [ ] Step 3.3.4: Fiedler vector diagnostic for disconnected clusters
+- [ ] Step 3.3.5: Tests: fully connected grid passes, grid with dead edge fails, Fiedler identifies island
+
+### 3.4 — Phase B: Gelman-Rubin Two-Initialization Convergence
+
+The fundamental problem: stationarity within a metastable basin looks like
+equilibration — Welch t-test passes even when stuck in one phase.
+
+Solution: run the full 2D PT twice from independent initializations:
+- Run 1: all replicas cold-start (ordered phase)
+- Run 2: all replicas random-start (vacancy phase)
+
+Compare observable distributions at each slot:
+- If they agree → genuinely equilibrated
+- If they disagree → those slots haven't mixed, likely near the first-order line
+
+The disagreement map reveals the first-order transition line as a byproduct.
+
+This is the only robust check — it distinguishes "correctly in one phase" from
+"stuck in one phase".
+
+- [ ] Step 3.4.1: Cold-start and random-start initialization routines
+- [ ] Step 3.4.2: Run two independent 2D PT campaigns
+- [ ] Step 3.4.3: Gelman-Rubin comparison across slots
+- [ ] Step 3.4.4: Disagreement map construction (transition line detection)
+- [ ] Step 3.4.5: Manual validation: two converged runs agree, stuck runs disagree at expected slots
+
+### 3.5 — Phase C: Production
+
+Harvest snapshots at all (T, D) grid points.
+
+- Track phase crossings (Q transitions across 0.5) instead of geometric round
+  trips. Phase crossings are the physically meaningful mixing diagnostic: has a
+  replica visited both the ordered and vacancy basins?
+- Warn if phase crossings are insufficient at slots near the detected transition
+- Thinning: measure τ_int from Phase B data, use 3×τ_max
+
+- [ ] Step 3.5.1: Phase crossing tracker (Q-based)
+- [ ] Step 3.5.2: Production loop with 2D PT and HDF5 streaming
+- [ ] Step 3.5.3: Insufficient phase crossing warnings
+- [ ] Step 3.5.4: Tests: phase crossing counting, thinning rule applied
+
+### 3.6 — Pipeline Overview (2D PT)
+
+```
+Phase A (connectivity)  →  Phase B (convergence)    →  Phase C (produce)
+  geometric T/D grid        two independent runs        3×τ_max thinning
+  → run exchanges           → cold-start vs hot-start   → HDF5 streaming
+  → spectral gap check      → Gelman-Rubin compare      → phase crossing tracking
+  → Fiedler diagnostic      → locate transition line
+```
+
+### 3.7 — OpenMP
+
+`#pragma omp parallel for` on the replica sweep loop (both 1D and 2D). Each
+replica has independent state (lattice, RNG, cache) — no shared mutable state.
+
+Add `-fopenmp` to CMakeLists.txt, `py::gil_scoped_release` in bindings. Ising
+benefits too (1D PT sweep loop parallelized).
+
+- [ ] Step 3.7.1: Add OpenMP pragmas to `pt_rounds` and `pt_rounds_2d` sweep loops
+- [ ] Step 3.7.2: Thread-local RNG seeding (deterministic from base seed + thread ID)
+- [ ] Step 3.7.3: Manual validation: results correct with >1 thread
+
+### 3.8 — Orchestrator Changes
+
+- Remove `multiprocessing.Pool` and `_worker_init()`
+- BC/AT: single `PTEngine2D` covering full (T, param) grid
+- Ising: single `PTEngine` (1D), no multiprocessing needed
+- User specifies: `T_range`, `param_range` (D_min, D_max), `n_T`, `n_D`
+- D_min MUST be below D_tcp for the second-order bridge to work
+- Rename CLI `--workers` → `--threads`: same user intent ("use N cores"), but now
+  sets `OMP_NUM_THREADS` instead of `Pool(max_workers)`
+
+- [ ] Step 3.8.1: Refactor `generate_dataset()` to dispatch 1D (Ising) vs 2D (BC/AT)
+- [ ] Step 3.8.2: `run_campaign_2d()` — single-param-grid entry point
+- [ ] Step 3.8.3: Validate D_min < D_tcp constraint
+- [ ] Step 3.8.4: Rename `--workers` to `--threads`, wire to `OMP_NUM_THREADS`
+- [ ] Step 3.8.5: Manual validation: orchestrator dispatches correctly by model type
+
+### 3.9 — HDF5 Output Changes
+
+One HDF5 file per 2D PT campaign (covers all grid points).
+
+- Group key includes both T and D: `T={T:.4f}_D={D:.4f}/`
+- Filename encodes T_range, D_range, n_T, n_D
+
+- [ ] Step 3.9.1: Update `SnapshotWriter` for 2D group keys
+- [ ] Step 3.9.2: Update filename encoding for 2D campaigns
+- [ ] Step 3.9.3: Update `read_resume_state()` for 2D layout
+- [ ] Step 3.9.4: Tests: HDF5 round-trip with 2D group keys, resume from 2D file
+
+---
+
+## Validation & Diagnostics (manual)
 
 Validation and diagnostics will be done by hand, not via automated tests.
 
