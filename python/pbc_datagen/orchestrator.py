@@ -9,8 +9,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from pbc_datagen.io import read_resume_state
+from pbc_datagen.io import read_resume_state, read_resume_state_2d
 from pbc_datagen.parallel_tempering import PTEngine
+from pbc_datagen.pt_engine_2d import PTEngine2D
 
 _VALID_MODELS: set[str] = {"ising", "blume_capel", "ashkin_teller"}
 
@@ -173,6 +174,101 @@ def set_omp_threads(n_threads: int) -> None:
     logger.debug("OMP_NUM_THREADS={}", n_threads)
 
 
+def find_existing_hdf5_2d(
+    output_dir: str | Path,
+    model_type: str,
+    L: int,
+    T_range: tuple[float, float],
+    param_range: tuple[float, float],
+    n_T: int,
+    n_P: int,
+) -> Path | None:
+    """Find the most recent 2D HDF5 file for this exact config."""
+    directory = Path(output_dir)
+    label = _param_label(model_type)
+    if label is None:
+        return None  # Ising doesn't use 2D PT
+    T_seg = f"T={T_range[0]:.4f}-{T_range[1]:.4f}"
+    P_seg = f"{label}={param_range[0]:.4f}-{param_range[1]:.4f}"
+    pattern = f"{model_type}_L{L}_{T_seg}_{P_seg}_{n_T}x{n_P}_*.h5"
+
+    matches = sorted(directory.glob(pattern))
+    if not matches:
+        logger.debug("No existing 2D HDF5 for pattern {}", pattern)
+        return None
+
+    def _timestamp(p: Path) -> int:
+        return int(p.stem.rsplit("_", 1)[-1])
+
+    result = max(matches, key=_timestamp)
+    logger.debug("Found existing 2D HDF5: {}", result.name)
+    return result
+
+
+def run_campaign_2d(
+    model_type: str,
+    L: int,
+    T_range: tuple[float, float],
+    param_range: tuple[float, float],
+    n_T: int,
+    n_P: int,
+    n_snapshots: int,
+    output_dir: str | Path,
+    force_new: bool = False,
+    connectivity_rounds: int = 10_000,
+) -> Path:
+    """Run one 2D PT campaign covering the full (T, param) grid.
+
+    Fresh start: A→B→C.  Resume: skip to C with saved state.
+    """
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    label = _param_label(model_type)
+
+    existing = (
+        None
+        if force_new
+        else find_existing_hdf5_2d(directory, model_type, L, T_range, param_range, n_T, n_P)
+    )
+
+    if existing is not None:
+        logger.info("Resuming 2D campaign from {}", existing.name)
+        old_seed, state = read_resume_state_2d(existing)
+        seed_history: list[tuple[int, int]] = state["seed_history"]
+
+        counts = state["snapshot_counts"]
+        n_existing = min(counts.values()) if counts else 0
+        if n_existing >= n_snapshots:
+            logger.info("Already complete ({}/{}), skipping", n_existing, n_snapshots)
+            return existing
+
+        new_seed = _derive_seed(old_seed, n_existing)
+        seed_history.append((n_existing, new_seed))
+
+        engine = PTEngine2D(model_type, L, T_range, param_range, n_T, n_P, new_seed)
+        engine.temps = state["temps"]
+        engine.params = state["params"]
+        engine.connectivity_checked = True
+        engine.tau_max = state["tau_max"]
+        engine.produce(existing, n_snapshots, seed_history=seed_history)
+        return existing
+    else:
+        ts = int(time.time() * 1000)
+        seed = ts % (2**63)
+        T_seg = f"T={T_range[0]:.4f}-{T_range[1]:.4f}"
+        P_seg = f"{label}={param_range[0]:.4f}-{param_range[1]:.4f}"
+        filename = f"{model_type}_L{L}_{T_seg}_{P_seg}_{n_T}x{n_P}_{ts}.h5"
+        path = directory / filename
+        logger.info("Fresh 2D campaign: {}", filename)
+
+        engine = PTEngine2D(model_type, L, T_range, param_range, n_T, n_P, seed)
+        engine.check_connectivity(n_rounds=connectivity_rounds)
+        engine.equilibrate()
+        engine.produce(path, n_snapshots)
+        logger.info("2D campaign complete: {}", filename)
+        return path
+
+
 def generate_dataset(
     model_type: str,
     L: int,
@@ -183,11 +279,10 @@ def generate_dataset(
     output_dir: str | Path = "output/",
     force_new: bool = False,
 ) -> None:
-    """Run PT campaigns sequentially for each param value.
+    """Run 1D PT campaigns sequentially for each param value.
 
-    Parallelism comes from OpenMP inside the C++ sweep loop, not from
-    Python multiprocessing.  Call ``set_omp_threads()`` before this
-    function to control the thread count.
+    For Ising (and legacy single-param BC/AT runs).
+    Call ``set_omp_threads()`` before this function.
     """
     logger.info(
         "Generating dataset: {} param values (sequential, OpenMP sweeps)",
@@ -195,3 +290,34 @@ def generate_dataset(
     )
     for p in param_values:
         run_campaign(model_type, L, p, T_range, n_replicas, n_snapshots, output_dir, force_new)
+
+
+def generate_dataset_2d(
+    model_type: str,
+    L: int,
+    T_range: tuple[float, float],
+    param_range: tuple[float, float],
+    n_T: int = 10,
+    n_P: int = 10,
+    n_snapshots: int = 100,
+    output_dir: str | Path = "output/",
+    force_new: bool = False,
+    connectivity_rounds: int = 10_000,
+) -> None:
+    """Run a single 2D PT campaign covering the full (T, param) grid.
+
+    For Blume-Capel and Ashkin-Teller near first-order transitions.
+    Call ``set_omp_threads()`` before this function.
+    """
+    run_campaign_2d(
+        model_type,
+        L,
+        T_range,
+        param_range,
+        n_T,
+        n_P,
+        n_snapshots,
+        output_dir,
+        force_new,
+        connectivity_rounds=connectivity_rounds,
+    )

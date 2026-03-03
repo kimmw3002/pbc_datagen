@@ -340,8 +340,8 @@ This is the only robust check — it distinguishes "correctly in one phase" from
 - [x] Step 3.4.1: `convergence_check()` — two-initialization comparison function (discard first half, batch-means blocking, Welch t-test with Bonferroni correction)
 - [x] Step 3.4.2: `ConvergenceResult` dataclass with `converged` flag and per-(observable, slot) `disagreement_map`
 - [x] Step 3.4.3: Tests: identical/IID-same/shifted-mean/selective-slot/multi-observable/constant (6 tests, synthetic data only)
-- [ ] Step 3.4.4: Cold-start and random-start initialization routines
-- [ ] Step 3.4.5: Run two independent 2D PT campaigns + disagreement map construction
+- [x] Step 3.4.4: Cold-start and random-start initialization routines
+- [x] Step 3.4.5: Run two independent 2D PT campaigns + disagreement map construction
 - [ ] Step 3.4.6: Manual validation: two converged runs agree, stuck runs disagree at expected slots
 
 ### 3.5 — Phase C: Production
@@ -354,9 +354,9 @@ Harvest snapshots at all (T, D) grid points.
 - Warn if phase crossings are insufficient at slots near the detected transition
 - Thinning: measure τ_int from Phase B data, use 3×τ_max
 
-- [ ] Step 3.5.1: Phase crossing tracker (Q-based)
-- [ ] Step 3.5.2: Production loop with 2D PT and HDF5 streaming
-- [ ] Step 3.5.3: Insufficient phase crossing warnings
+- [x] Step 3.5.1: Phase crossing tracker (Q-based)
+- [x] Step 3.5.2: Production loop with 2D PT and HDF5 streaming
+- [x] Step 3.5.3: Insufficient phase crossing warnings
 - [ ] Step 3.5.4: Tests: phase crossing counting, thinning rule applied
 
 ### 3.6 — Pipeline Overview (2D PT)
@@ -391,8 +391,8 @@ benefits too (1D PT sweep loop parallelized).
 - Rename CLI `--workers` → `--threads`: same user intent ("use N cores"), but now
   sets `OMP_NUM_THREADS` instead of `Pool(max_workers)`
 
-- [ ] Step 3.8.1: Refactor `generate_dataset()` to dispatch 1D (Ising) vs 2D (BC/AT)
-- [ ] Step 3.8.2: `run_campaign_2d()` — single-param-grid entry point
+- [x] Step 3.8.1: Refactor `generate_dataset()` to dispatch 1D (Ising) vs 2D (BC/AT)
+- [x] Step 3.8.2: `run_campaign_2d()` — single-param-grid entry point
 - [ ] Step 3.8.3: Validate D_min < D_tcp constraint
 - [x] Step 3.8.4: Rename `--workers` to `--threads`, wire to `OMP_NUM_THREADS`
 - [ ] Step 3.8.5: Manual validation: orchestrator dispatches correctly by model type
@@ -404,9 +404,9 @@ One HDF5 file per 2D PT campaign (covers all grid points).
 - Group key includes both T and D: `T={T:.4f}_D={D:.4f}/`
 - Filename encodes T_range, D_range, n_T, n_D
 
-- [ ] Step 3.9.1: Update `SnapshotWriter` for 2D group keys
-- [ ] Step 3.9.2: Update filename encoding for 2D campaigns
-- [ ] Step 3.9.3: Update `read_resume_state()` for 2D layout
+- [x] Step 3.9.1: Update `SnapshotWriter` for 2D group keys
+- [x] Step 3.9.2: Update filename encoding for 2D campaigns
+- [x] Step 3.9.3: Update `read_resume_state()` for 2D layout
 - [ ] Step 3.9.4: Tests: HDF5 round-trip with 2D group keys, resume from 2D file
 
 ---
