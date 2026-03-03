@@ -411,7 +411,22 @@ One HDF5 file per 2D PT campaign (covers all grid points).
 
 ---
 
-## Validation & Diagnostics (manual)
+### Single-Chain MCMC Runner ✅
+
+Files: `python/pbc_datagen/single_chain.py`, `scripts/generate_single.py`
+
+Simpler alternative to PTEngine for single (param, T) point — no replica management,
+no ladder tuning. Uses the same C++ `sweep()` API.
+
+- [x] Step 2.5.1: `SingleChainEngine.__init__` — model factory, store state
+- [x] Step 2.5.2: `SingleChainEngine.equilibrate()` — doubling Welch t-test + τ_int measurement
+- [x] Step 2.5.3: `SingleChainEngine.produce()` — thinned snapshot harvesting to HDF5
+- [x] Step 2.5.4: `find_existing_single_hdf5()` + `run_single_campaign()` — file discovery + resume
+- [x] Step 2.5.5: `scripts/generate_single.py` — CLI wrapper (argparse + rich panel)
+
+---
+
+## Phase 3: Validation & Diagnostics (manual)
 
 Validation and diagnostics will be done by hand, not via automated tests.
 
@@ -456,6 +471,7 @@ Validation and diagnostics will be done by hand, not via automated tests.
 - [x] Integration: fresh campaign creates HDF5 with correct layout and filename
 - [x] Integration: resume reuses file, appends to target, extends seed history
 
+
 ### Phase 3 Tests — 2D PT Exchange (`tests/test_pt_2d_exchange.py`) 🚧
 
 8 tests: `TestPtExchangeParam` (3), `TestPt2dDetailedBalanceBlumeCapel` (2 integration), `TestPt2dDetailedBalanceAshkinTeller` (3 integration).
@@ -465,3 +481,15 @@ Validation and diagnostics will be done by hand, not via automated tests.
 - [ ] Unit: `pt_exchange_param` — acceptance rate matches exp(Δ) statistically
 - [ ] Integration: BC 2×2 on T×D grid (D=0.0–0.5, D=0.3–0.8), chi-squared vs exact P(E)
 - [ ] Integration: AT 2×2 on T×U grid (U=0.0–0.5, U=0.5–1.5, U=1.0–1.5), chi-squared vs exact P(E)
+
+
+### Single-Chain Tests — Single-Chain Runner (`tests/test_single_chain.py`) ✅
+
+23 tests: `TestSingleChainInit` (4), `TestEquilibrate` (2), `TestProduce` (4), `TestFindExistingSingleHdf5` (6), `TestRunSingleCampaign` (7).
+
+- [x] Unit: constructor creates correct model, unknown model raises
+- [x] Unit: `equilibrate()` sets positive τ_max, `produce()` before `equilibrate()` raises
+- [x] Unit: `produce()` writes correct HDF5 structure (snapshots, observables, attrs) for all 3 models
+- [x] Unit: `find_existing_single_hdf5` returns newest match, ignores wrong model/L/T
+- [x] Integration: fresh campaign creates HDF5 with correct filename and layout
+- [x] Integration: resume reuses file, appends to target, extends seed history
