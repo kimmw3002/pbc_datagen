@@ -249,6 +249,12 @@ PTResult pt_rounds(
 // and phase-crossing counts when those diagnostics are implemented.
 struct PT2DResult {
     ObsStreams obs_streams;
+    // T-direction: t_accepts[j*(n_T-1) + i] = edge (i,j)↔(i+1,j)
+    std::vector<int> t_accepts;
+    std::vector<int> t_attempts;
+    // Param-direction: p_accepts[i*(n_P-1) + j] = edge (i,j)↔(i,j+1)
+    std::vector<int> p_accepts;
+    std::vector<int> p_attempts;
 };
 
 // ── 3.2.4  pt_rounds_2d — 2D parameter-space PT composition loop ──
@@ -288,6 +294,14 @@ PT2DResult pt_rounds_2d(
         }
     }
 
+    // Per-edge acceptance counters.
+    // T-direction: index j*(n_T-1) + i  = edge (i,j)↔(i+1,j)
+    // P-direction: index i*(n_P-1) + j  = edge (i,j)↔(i,j+1)
+    std::vector<int> t_accepts(n_P * (n_T - 1), 0);
+    std::vector<int> t_attempts(n_P * (n_T - 1), 0);
+    std::vector<int> p_accepts(n_T * (n_P - 1), 0);
+    std::vector<int> p_attempts(n_T * (n_P - 1), 0);
+
     for (int round = 0; round < n_rounds; ++round) {
         // Sweep each replica at its current (T, param).
         #pragma omp parallel for schedule(static) if(M >= 8)
@@ -303,17 +317,20 @@ PT2DResult pt_rounds_2d(
         // T-direction exchanges (within each param column)
         for (int j = 0; j < n_P; ++j) {
             for (int i = 0; i < n_T - 1; ++i) {
+                int edge = j * (n_T - 1) + i;
                 int s_lo = i * n_P + j;
                 int s_hi = (i + 1) * n_P + j;
                 int r_lo = s2r[s_lo];
                 int r_hi = s2r[s_hi];
                 double E_lo = replicas[r_lo]->energy();
                 double E_hi = replicas[r_hi]->energy();
+                ++t_attempts[edge];
                 if (pt_exchange(E_lo, E_hi, temps[i], temps[i + 1], rng)) {
                     r2s[r_lo] = s_hi;
                     r2s[r_hi] = s_lo;
                     s2r[s_lo] = r_hi;
                     s2r[s_hi] = r_lo;
+                    ++t_accepts[edge];
                 }
             }
         }
@@ -321,18 +338,21 @@ PT2DResult pt_rounds_2d(
         // Param-direction exchanges (within each T row)
         for (int i = 0; i < n_T; ++i) {
             for (int j = 0; j < n_P - 1; ++j) {
+                int edge = i * (n_P - 1) + j;
                 int s_lo = i * n_P + j;
                 int s_hi = i * n_P + j + 1;
                 int r_lo = s2r[s_lo];
                 int r_hi = s2r[s_hi];
                 double dEdp_lo = replicas[r_lo]->dE_dparam();
                 double dEdp_hi = replicas[r_hi]->dE_dparam();
+                ++p_attempts[edge];
                 if (pt_exchange_param(dEdp_lo, dEdp_hi, temps[i],
                                       params[j], params[j + 1], rng)) {
                     r2s[r_lo] = s_hi;
                     r2s[r_hi] = s_lo;
                     s2r[s_lo] = r_hi;
                     s2r[s_hi] = r_lo;
+                    ++p_accepts[edge];
                 }
             }
         }
@@ -352,7 +372,11 @@ PT2DResult pt_rounds_2d(
         }
     }
 
-    return PT2DResult{std::move(obs_streams)};
+    return PT2DResult{
+        std::move(obs_streams),
+        std::move(t_accepts), std::move(t_attempts),
+        std::move(p_accepts), std::move(p_attempts)
+    };
 }
 
 }  // namespace pbc

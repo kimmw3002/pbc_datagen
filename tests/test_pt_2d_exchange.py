@@ -255,6 +255,96 @@ class TestPtExchangeParam:
 
 
 # ---------------------------------------------------------------------------
+# Acceptance tracking in PT2DResult
+# ---------------------------------------------------------------------------
+
+
+class TestPt2dAcceptanceTracking:
+    """pt_rounds_2d must return per-edge acceptance counts
+    correctly coupled to the T and param axes."""
+
+    def test_same_T_gives_100pct_T_acceptance(self) -> None:
+        """When all temperatures are identical, T-direction exchanges
+        have Δ = (1/T - 1/T)(E_i - E_j) = 0 → always accept.
+
+        Meanwhile param-direction exchanges see different D values
+        at non-trivial β, so some will be rejected.
+
+        This proves T-edges use temperature values, not param values.
+        """
+        from pbc_datagen._core import BlumeCapelModel, Rng, pt_rounds_2d_bc
+
+        temps = [2.0, 2.0, 2.0]  # identical → T-exchanges trivial
+        params = [0.0, 0.8]  # different → P-exchanges non-trivial
+        n_T, n_P = len(temps), len(params)
+        M = n_T * n_P
+
+        replicas = [BlumeCapelModel(L_TEST, 42 + r) for r in range(M)]
+        for i in range(n_T):
+            for j in range(n_P):
+                s = i * n_P + j
+                replicas[s].set_temperature(temps[i])
+                replicas[s].set_crystal_field(params[j])
+
+        r2s = list(range(M))
+        s2r = list(range(M))
+        rng = Rng(99)
+
+        result = pt_rounds_2d_bc(replicas, temps, params, r2s, s2r, 500, rng, False)
+
+        # T-direction: all accept (same T → Δ=0)
+        for acc, att in zip(result["t_accepts"], result["t_attempts"]):
+            assert acc == att, f"T-edge should be 100% accept, got {acc}/{att}"
+
+        # P-direction: some rejections (different D at finite β)
+        total_p_acc = sum(result["p_accepts"])
+        total_p_att = sum(result["p_attempts"])
+        assert total_p_acc < total_p_att, (
+            "P-edges should have some rejections with different D values"
+        )
+
+    def test_same_param_gives_100pct_P_acceptance(self) -> None:
+        """When all param values are identical, param-direction exchanges
+        have Δ = β(p - p)(dEdp_i - dEdp_j) = 0 → always accept.
+
+        Meanwhile T-direction exchanges see different temperatures,
+        so some will be rejected.
+
+        This proves P-edges use param values, not temperature values.
+        """
+        from pbc_datagen._core import BlumeCapelModel, Rng, pt_rounds_2d_bc
+
+        temps = [1.0, 5.0]  # different → T-exchanges non-trivial
+        params = [0.5, 0.5, 0.5]  # identical → P-exchanges trivial
+        n_T, n_P = len(temps), len(params)
+        M = n_T * n_P
+
+        replicas = [BlumeCapelModel(L_TEST, 42 + r) for r in range(M)]
+        for i in range(n_T):
+            for j in range(n_P):
+                s = i * n_P + j
+                replicas[s].set_temperature(temps[i])
+                replicas[s].set_crystal_field(params[j])
+
+        r2s = list(range(M))
+        s2r = list(range(M))
+        rng = Rng(99)
+
+        result = pt_rounds_2d_bc(replicas, temps, params, r2s, s2r, 500, rng, False)
+
+        # P-direction: all accept (same param → Δ=0)
+        for acc, att in zip(result["p_accepts"], result["p_attempts"]):
+            assert acc == att, f"P-edge should be 100% accept, got {acc}/{att}"
+
+        # T-direction: some rejections (different T)
+        total_t_acc = sum(result["t_accepts"])
+        total_t_att = sum(result["t_attempts"])
+        assert total_t_acc < total_t_att, (
+            "T-edges should have some rejections with different temperatures"
+        )
+
+
+# ---------------------------------------------------------------------------
 # 2D PT detailed balance — Blume-Capel (D < 1)
 # ---------------------------------------------------------------------------
 

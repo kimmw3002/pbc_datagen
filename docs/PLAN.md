@@ -313,11 +313,11 @@ diagnostic showing which (T,D) slots are isolated.
 This replaces naive "all gaps > 10%" which misses collective barriers and
 false-fails well-connected grids with one weak link.
 
-- [ ] Step 3.3.1: Build acceptance-rate adjacency matrix from exchange statistics
-- [ ] Step 3.3.2: Construct Markov transition matrix from adjacency
-- [ ] Step 3.3.3: Compute spectral gap via `scipy.sparse.linalg.eigsh`
-- [ ] Step 3.3.4: Fiedler vector diagnostic for disconnected clusters
-- [ ] Step 3.3.5: Tests: fully connected grid passes, grid with dead edge fails, Fiedler identifies island
+- [x] Step 3.3.1: Per-edge acceptance tracking in `PT2DResult` (C++: `t_accepts`/`t_attempts`, `p_accepts`/`p_attempts`)
+- [x] Step 3.3.2: `build_transition_matrix()` — lazy random walk P = W/d_max + diag(1 − d/d_max)
+- [x] Step 3.3.3: `check_connectivity()` — spectral gap via `np.linalg.eigh` (P is symmetric, M small)
+- [x] Step 3.3.4: Fiedler vector diagnostic; `connected_components` fallback for degenerate eigenspaces
+- [x] Step 3.3.5: Tests: 2 acceptance tracking (axis coupling) + 6 spectral (connected/dead/fiedler/bottleneck/detour)
 
 ### 3.4 — Phase B: Gelman-Rubin Two-Initialization Convergence
 

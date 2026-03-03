@@ -536,6 +536,10 @@ PYBIND11_MODULE(_core, m) {
             streams[py::cast(name)] = slot_list;
         }
         out["obs_streams"] = streams;
+        out["t_accepts"]   = res.t_accepts;
+        out["t_attempts"]  = res.t_attempts;
+        out["p_accepts"]   = res.p_accepts;
+        out["p_attempts"]  = res.p_attempts;
         return out;
     };
 

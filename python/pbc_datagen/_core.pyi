@@ -18,9 +18,14 @@ class PTResult(TypedDict):
 class PT2DResult(TypedDict):
     # r2s, s2r are mutated in-place on the Python lists passed
     # to pt_rounds_2d — they are NOT in this dict.
-    # No 1D label tracking (n_up/n_down/round_trip_count) — the 2D grid
-    # has no single cold→hot axis for those diagnostics to apply.
     obs_streams: dict[str, list[list[float]]]
+    # Per-edge acceptance counters (T-direction and param-direction).
+    # T: t_accepts[j*(n_T-1) + i] = edge (i,j)↔(i+1,j)
+    # P: p_accepts[i*(n_P-1) + j] = edge (i,j)↔(i,j+1)
+    t_accepts: list[int]
+    t_attempts: list[int]
+    p_accepts: list[int]
+    p_attempts: list[int]
 
 class Rng:
     def __init__(self, seed: int) -> None: ...
