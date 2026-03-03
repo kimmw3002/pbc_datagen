@@ -14,12 +14,12 @@ from loguru import logger
 
 def _t_group_name(T: float) -> str:
     """Canonical HDF5 group name for a temperature slot."""
-    return f"T={T}"
+    return f"T={T:.4f}"
 
 
 def _slot_group_name_2d(T: float, param: float, param_label: str) -> str:
     """Canonical HDF5 group name for a 2D PT slot."""
-    return f"T={T}_{param_label}={param}"
+    return f"T={T:.4f}_{param_label}={param:.4f}"
 
 
 class SnapshotWriter:

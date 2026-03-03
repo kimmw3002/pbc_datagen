@@ -77,6 +77,11 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42, help="RNG seed")
     parser.add_argument("--no-show", action="store_true", help="Skip plt.show()")
+    parser.add_argument("--T", nargs="*", type=float, help="Temperature values to include")
+    parser.add_argument("--param", nargs="*", type=float, help="Parameter values to include")
+    parser.add_argument(
+        "--list", action="store_true", help="List available T/param values and exit"
+    )
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -102,6 +107,29 @@ def main() -> None:
                 key=lambda x: x[0],
             )
             slot_iter = [(T_val, param_value, gname) for T_val, gname in t_groups]
+
+        # --list: print available values and exit
+        if args.list:
+            temps = sorted({T_val for T_val, _, _ in slot_iter})
+            params = sorted({pv for _, pv, _ in slot_iter})
+            print(f"T values ({len(temps)}):  {', '.join(f'{t:.4f}' for t in temps)}")
+            if is_2d:
+                assert param_label is not None
+                print(
+                    f"{param_label} values ({len(params)}):  "
+                    f"{', '.join(f'{p:.4f}' for p in params)}"
+                )
+            else:
+                print(f"param value: {params[0]}")
+            return
+
+        # Apply optional filters (group names are already 4 d.p.)
+        if args.T is not None:
+            t_set = set(args.T)
+            slot_iter = [(T_val, pv, gname) for T_val, pv, gname in slot_iter if T_val in t_set]
+        if args.param is not None:
+            p_set = set(args.param)
+            slot_iter = [(T_val, pv, gname) for T_val, pv, gname in slot_iter if pv in p_set]
 
         for T_val, pv, gname in slot_iter:
             snaps = f[gname]["snapshots"]

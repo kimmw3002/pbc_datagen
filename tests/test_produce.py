@@ -105,7 +105,7 @@ class TestProduceHDF5Layout:
             assert len(groups) == engine.n_replicas
             # Each group name should match a T value in the ladder
             for T in engine.temps:
-                assert f"T={T}" in groups
+                assert f"T={T:.4f}" in groups
 
     def test_correct_snapshot_count(self, tmp_path: Path) -> None:
         """Each T slot has exactly n_snapshots snapshots in its dataset.
@@ -121,7 +121,7 @@ class TestProduceHDF5Layout:
 
         with h5py.File(path, "r") as f:
             for T in engine.temps:
-                ds = f[f"T={T}"]["snapshots"]
+                ds = f[f"T={T:.4f}"]["snapshots"]
                 assert ds.shape[0] == n_snapshots
 
     def test_snapshot_dtype_and_shape(self, tmp_path: Path) -> None:
@@ -138,7 +138,7 @@ class TestProduceHDF5Layout:
         engine.produce(path, n_snapshots=n_snapshots)
 
         with h5py.File(path, "r") as f:
-            ds = f[f"T={engine.temps[0]}"]["snapshots"]
+            ds = f[f"T={engine.temps[0]:.4f}"]["snapshots"]
             assert ds.dtype == np.int8
             assert ds.shape == (n_snapshots, 1, L, L)
 
@@ -157,7 +157,7 @@ class TestProduceHDF5Layout:
         expected_obs = list(engine.replicas[0].observables().keys())
 
         with h5py.File(path, "r") as f:
-            grp = f[f"T={engine.temps[0]}"]
+            grp = f[f"T={engine.temps[0]:.4f}"]
             for name in expected_obs:
                 assert name in grp, f"missing observable dataset '{name}'"
                 ds = grp[name]
@@ -186,7 +186,7 @@ class TestProduceDataIntegrity:
 
         with h5py.File(path, "r") as f:
             for T in engine.temps:
-                data = f[f"T={T}"]["snapshots"][:]
+                data = f[f"T={T:.4f}"]["snapshots"][:]
                 # Every element must be exactly +1 or -1
                 assert np.all(np.isin(data, [-1, 1])), (
                     f"Invalid spin values at T={T}: unique={np.unique(data)}"
@@ -207,7 +207,7 @@ class TestProduceDataIntegrity:
 
         with h5py.File(path, "r") as f:
             for T in engine.temps:
-                grp = f[f"T={T}"]
+                grp = f[f"T={T:.4f}"]
                 for name in expected_obs:
                     values = grp[name][:]
                     assert np.all(np.isfinite(values)), f"Non-finite values in {name} at T={T}"
@@ -318,7 +318,7 @@ class TestProduceResume:
 
         with h5py.File(path, "r") as f:
             for T in engine.temps:
-                assert f[f"T={T}"]["snapshots"].shape[0] == 5
+                assert f[f"T={T:.4f}"]["snapshots"].shape[0] == 5
 
     def test_resume_already_complete_is_noop(self, tmp_path: Path) -> None:
         """If file already has n_snapshots, produce() adds nothing.
@@ -334,7 +334,7 @@ class TestProduceResume:
 
         with h5py.File(path, "r") as f:
             for T in engine.temps:
-                assert f[f"T={T}"]["snapshots"].shape[0] == 3
+                assert f[f"T={T:.4f}"]["snapshots"].shape[0] == 3
 
     def test_seed_history_from_caller(self, tmp_path: Path) -> None:
         """produce() uses caller-provided seed_history instead of default.

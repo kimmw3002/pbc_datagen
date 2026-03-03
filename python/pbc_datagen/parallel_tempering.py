@@ -22,7 +22,7 @@ from scipy import stats
 
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int, tau_int_multi
-from pbc_datagen.io import SnapshotWriter, write_param_attrs
+from pbc_datagen.io import SnapshotWriter, _t_group_name, write_param_attrs
 
 # Union of all model types — mypy needs this to see set_temperature etc.
 Model = Union[_core.IsingModel, _core.BlumeCapelModel, _core.AshkinTellerModel]
@@ -651,7 +651,7 @@ class PTEngine:
 
         with SnapshotWriter(path) as writer:
             # Create T slots only if they don't already exist
-            first_key = f"T={self.temps[0]}"
+            first_key = _t_group_name(self.temps[0])
             if first_key not in writer._file:
                 for T in self.temps:
                     writer.create_temperature_slot(T=T, L=L, C=C, obs_names=obs_names)

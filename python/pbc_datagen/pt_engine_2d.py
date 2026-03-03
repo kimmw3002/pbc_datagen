@@ -22,7 +22,7 @@ from loguru import logger
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int_multi
 from pbc_datagen.convergence import convergence_check
-from pbc_datagen.io import SnapshotWriter, write_param_attrs_2d
+from pbc_datagen.io import SnapshotWriter, _slot_group_name_2d, write_param_attrs_2d
 from pbc_datagen.spectral import check_connectivity
 
 Model = Union[_core.BlumeCapelModel, _core.AshkinTellerModel]
@@ -383,7 +383,7 @@ class PTEngine2D:
 
         with SnapshotWriter(path) as writer:
             # Create slots if they don't exist
-            first_key = f"T={self.temps[0]}_{pl}={self.params[0]}"
+            first_key = _slot_group_name_2d(self.temps[0], self.params[0], pl)
             if first_key not in writer._file:
                 for i_t in range(self.n_T):
                     for j_p in range(self.n_P):

@@ -23,7 +23,7 @@ from loguru import logger
 
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int_multi
-from pbc_datagen.io import SnapshotWriter, read_resume_state, write_param_attrs
+from pbc_datagen.io import SnapshotWriter, _t_group_name, read_resume_state, write_param_attrs
 from pbc_datagen.orchestrator import _derive_seed, _param_label
 from pbc_datagen.parallel_tempering import welch_equilibration_check
 
@@ -179,7 +179,7 @@ class SingleChainEngine:
             thinning,
         )
 
-        t_group = f"T={self.T}"
+        t_group = _t_group_name(self.T)
 
         with SnapshotWriter(path) as writer:
             # Create T slot if it doesn't exist
