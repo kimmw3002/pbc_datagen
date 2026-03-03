@@ -43,3 +43,6 @@ compile_commands.json
 
 # Logs
 *.log
+
+# images
+images/
