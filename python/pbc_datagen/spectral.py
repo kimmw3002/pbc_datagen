@@ -120,23 +120,35 @@ def check_connectivity(
     P = build_transition_matrix(n_T, n_P, t_accept_rates, p_accept_rates)
     M = n_T * n_P
 
-    # P is symmetric → real eigenvalues, use eigh for stability.
-    # M is small (typically 10–200) so dense is fine.
-    Pd = P.toarray()
-    eigenvalues, eigenvectors = np.linalg.eigh(Pd)
+    if M <= 1:
+        return ConnectivityResult(passed=True, gap=1.0, fiedler=None)
 
-    # eigh returns ascending order: eigenvalues[-1] = 1, eigenvalues[-2] = λ₂
-    gap = float(1.0 - eigenvalues[-2]) if M > 1 else 1.0
+    if M <= 2:
+        # eigsh requires k < M; dense fallback for trivially small grids
+        Pd = P.toarray()
+        eigenvalues, eigenvectors = np.linalg.eigh(Pd)
+        gap = float(1.0 - eigenvalues[-2])
+        passed = gap >= min_gap
+        fiedler = eigenvectors[:, -2].copy() if not passed else None
+        return ConnectivityResult(passed=passed, gap=gap, fiedler=fiedler)
+
+    # Sparse path: Lanczos iteration, never forms the M×M dense matrix.
+    # k=2 → only λ₁≈1 and λ₂; which="LM" = largest magnitude (≡ largest
+    # value here since all eigenvalues are in [0,1]).
+    vals, vecs = sparse.linalg.eigsh(P, k=2, which="LM")
+
+    # argsort ascending: order[0] → λ₂ (smaller), order[1] → λ₁≈1
+    order = np.argsort(vals)
+    gap = float(1.0 - vals[order[0]])
     passed = gap >= min_gap
 
-    fiedler: npt.NDArray[np.float64] | None = None
+    fiedler = None
     if not passed:
         if gap < 1e-10:
-            # Truly disconnected — degenerate eigenspace makes the
-            # eigenvector unreliable.  Use connected components instead.
-            n_comp, labels = sparse.csgraph.connected_components(P, directed=False)
+            # Truly disconnected — degenerate eigenspace; use connected components
+            _, labels = sparse.csgraph.connected_components(P, directed=False)
             fiedler = np.where(labels == labels[0], 1.0, -1.0)
         else:
-            fiedler = eigenvectors[:, -2].copy()
+            fiedler = vecs[:, order[0]].copy()
 
     return ConnectivityResult(passed=passed, gap=gap, fiedler=fiedler)
