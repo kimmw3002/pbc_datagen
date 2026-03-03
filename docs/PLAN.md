@@ -337,11 +337,12 @@ The disagreement map reveals the first-order transition line as a byproduct.
 This is the only robust check — it distinguishes "correctly in one phase" from
 "stuck in one phase".
 
-- [ ] Step 3.4.1: Cold-start and random-start initialization routines
-- [ ] Step 3.4.2: Run two independent 2D PT campaigns
-- [ ] Step 3.4.3: Gelman-Rubin comparison across slots
-- [ ] Step 3.4.4: Disagreement map construction (transition line detection)
-- [ ] Step 3.4.5: Manual validation: two converged runs agree, stuck runs disagree at expected slots
+- [x] Step 3.4.1: `convergence_check()` — two-initialization comparison function (discard first half, batch-means blocking, Welch t-test with Bonferroni correction)
+- [x] Step 3.4.2: `ConvergenceResult` dataclass with `converged` flag and per-(observable, slot) `disagreement_map`
+- [x] Step 3.4.3: Tests: identical/IID-same/shifted-mean/selective-slot/multi-observable/constant (6 tests, synthetic data only)
+- [ ] Step 3.4.4: Cold-start and random-start initialization routines
+- [ ] Step 3.4.5: Run two independent 2D PT campaigns + disagreement map construction
+- [ ] Step 3.4.6: Manual validation: two converged runs agree, stuck runs disagree at expected slots
 
 ### 3.5 — Phase C: Production
 
