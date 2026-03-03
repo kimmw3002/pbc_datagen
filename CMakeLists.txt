@@ -11,6 +11,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
+find_package(OpenMP)
 
 pybind11_add_module(_core
     src/cpp/ising.cpp
@@ -20,5 +21,11 @@ pybind11_add_module(_core
 )
 
 target_include_directories(_core PRIVATE src/cpp/include)
+
+# Link OpenMP if available — enables #pragma omp in PT sweep loops.
+# If not found, the pragmas are silently ignored and everything runs single-threaded.
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(_core PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 install(TARGETS _core DESTINATION pbc_datagen)

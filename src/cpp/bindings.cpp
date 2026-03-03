@@ -434,8 +434,14 @@ PYBIND11_MODULE(_core, m) {
             auto t2r    = list_to_ivec(py_t2r);
             auto labels = list_to_ivec(py_labels);
 
-            auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
-                                       n_rounds, rng, track_obs);
+            pbc::PTResult res;
+            {
+                // Release the GIL while running pure C++ — allows OpenMP
+                // threads to run and other Python threads to proceed.
+                py::gil_scoped_release release;
+                res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
+                                     n_rounds, rng, track_obs);
+            }
 
             // r2t, t2r, labels were mutated by pt_rounds via reference —
             // write the final values back into the original Python lists.
@@ -462,8 +468,12 @@ PYBIND11_MODULE(_core, m) {
             auto t2r    = list_to_ivec(py_t2r);
             auto labels = list_to_ivec(py_labels);
 
-            auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
-                                       n_rounds, rng, track_obs);
+            pbc::PTResult res;
+            {
+                py::gil_scoped_release release;
+                res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
+                                     n_rounds, rng, track_obs);
+            }
 
             ivec_to_list(r2t, py_r2t);
             ivec_to_list(t2r, py_t2r);
@@ -488,8 +498,12 @@ PYBIND11_MODULE(_core, m) {
             auto t2r    = list_to_ivec(py_t2r);
             auto labels = list_to_ivec(py_labels);
 
-            auto res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
-                                       n_rounds, rng, track_obs);
+            pbc::PTResult res;
+            {
+                py::gil_scoped_release release;
+                res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
+                                     n_rounds, rng, track_obs);
+            }
 
             ivec_to_list(r2t, py_r2t);
             ivec_to_list(t2r, py_t2r);

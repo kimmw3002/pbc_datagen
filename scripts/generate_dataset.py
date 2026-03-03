@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from loguru import logger
-from pbc_datagen.orchestrator import generate_dataset
+from pbc_datagen.orchestrator import generate_dataset, set_omp_threads
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -81,7 +81,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--n-snapshots", type=int, default=100, help="Snapshots per T slot (default: 100)"
     )
-    parser.add_argument("--workers", type=int, default=4, help="Max parallel workers (default: 4)")
+    parser.add_argument(
+        "--threads", type=int, default=4, help="OpenMP threads for C++ sweep loop (default: 4)"
+    )
     parser.add_argument(
         "--output-dir", type=str, default="output/", help="Output directory (default: output/)"
     )
@@ -139,7 +141,7 @@ def main(argv: list[str] | None = None) -> None:
     table.add_row("T range", f"[{args.T_range[0]}, {args.T_range[1]}]")
     table.add_row("Replicas", str(args.n_replicas))
     table.add_row("Snapshots/T", str(args.n_snapshots))
-    table.add_row("Workers", str(args.workers))
+    table.add_row("Threads", str(args.threads))
     table.add_row("Output", str(output_dir.resolve()))
     table.add_row("Mode", "fresh" if getattr(args, "new") else "resume")
     table.add_row("Log file", str(log_file))
@@ -155,10 +157,13 @@ def main(argv: list[str] | None = None) -> None:
         tuple(args.T_range),
         args.n_replicas,
         args.n_snapshots,
-        args.workers,
+        args.threads,
     )
 
     t0 = time.perf_counter()
+
+    # Set OpenMP threads before any C++ calls
+    set_omp_threads(args.threads)
 
     generate_dataset(
         model_type=args.model,
@@ -167,10 +172,8 @@ def main(argv: list[str] | None = None) -> None:
         T_range=tuple(args.T_range),
         n_replicas=args.n_replicas,
         n_snapshots=args.n_snapshots,
-        max_workers=args.workers,
         output_dir=str(output_dir),
         force_new=args.new,
-        log_file=str(log_file),
     )
 
     elapsed = time.perf_counter() - t0

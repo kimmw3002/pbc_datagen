@@ -196,7 +196,12 @@ PTResult pt_rounds(
     }
 
     for (int round = 0; round < n_rounds; ++round) {
-        // Sweep each replica at its current temperature
+        // Sweep each replica at its current temperature.
+        // Each replica has independent state (lattice, RNG, cache)
+        // so iterations are fully independent — safe for OpenMP.
+        // if(M >= 8): skip thread-pool overhead for tiny replica counts
+        // (tests use M=3; production uses M=20–50).
+        #pragma omp parallel for schedule(static) if(M >= 8)
         for (int r = 0; r < M; ++r) {
             replicas[r]->set_temperature(temps[r2t[r]]);
             replicas[r]->sweep(1);

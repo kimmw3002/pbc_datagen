@@ -251,7 +251,7 @@ second-order region, where no barrier exists.
 2D PT converts an exponential barrier into a polynomial mixing time by routing
 replicas around the first-order line endpoint.
 
-- [ ] Step 3.0.1: Document the failure mode with a 1D PT run at D near the first-order line
+- [x] Step 3.0.1: Document the failure mode with a 1D PT run at D near the first-order line
 
 ### 3.1 — Architecture Changes
 
@@ -260,9 +260,9 @@ replicas around the first-order line endpoint.
 - Ising: keep 1D PT with KTH (Phases A→B→C unchanged), gains OpenMP for free
 - BC/AT: new 2D PT with three new phases (A→B→C redefined below)
 
-- [ ] Step 3.1.1: Remove `multiprocessing.Pool` and `_worker_init()` from orchestrator
-- [ ] Step 3.1.2: Add OpenMP flags to CMakeLists.txt
-- [ ] Step 3.1.3: Add `py::gil_scoped_release` to pybind11 bindings for sweep/PT functions
+- [x] Step 3.1.1: Remove `multiprocessing.Pool` and `_worker_init()` from orchestrator
+- [x] Step 3.1.2: Add OpenMP flags to CMakeLists.txt
+- [x] Step 3.1.3: Add `py::gil_scoped_release` to pybind11 bindings for sweep/PT functions
 
 ### 3.2 — 2D Grid & Exchange
 
@@ -362,7 +362,7 @@ replica has independent state (lattice, RNG, cache) — no shared mutable state.
 Add `-fopenmp` to CMakeLists.txt, `py::gil_scoped_release` in bindings. Ising
 benefits too (1D PT sweep loop parallelized).
 
-- [ ] Step 3.7.1: Add OpenMP pragmas to `pt_rounds` and `pt_rounds_2d` sweep loops
+- [x] Step 3.7.1: Add OpenMP pragmas to `pt_rounds` and `pt_rounds_2d` sweep loops
 - [ ] Step 3.7.2: Thread-local RNG seeding (deterministic from base seed + thread ID)
 - [ ] Step 3.7.3: Manual validation: results correct with >1 thread
 
@@ -379,7 +379,7 @@ benefits too (1D PT sweep loop parallelized).
 - [ ] Step 3.8.1: Refactor `generate_dataset()` to dispatch 1D (Ising) vs 2D (BC/AT)
 - [ ] Step 3.8.2: `run_campaign_2d()` — single-param-grid entry point
 - [ ] Step 3.8.3: Validate D_min < D_tcp constraint
-- [ ] Step 3.8.4: Rename `--workers` to `--threads`, wire to `OMP_NUM_THREADS`
+- [x] Step 3.8.4: Rename `--workers` to `--threads`, wire to `OMP_NUM_THREADS`
 - [ ] Step 3.8.5: Manual validation: orchestrator dispatches correctly by model type
 
 ### 3.9 — HDF5 Output Changes

@@ -1,37 +1,16 @@
-# Orchestrator — param-level parallelism for PT campaigns.
+# Orchestrator — sequential PT campaigns with OpenMP parallelism.
 
 from __future__ import annotations
 
 import hashlib
+import os
 import time
-from multiprocessing import Pool
 from pathlib import Path
 
 from loguru import logger
 
 from pbc_datagen.io import read_resume_state
 from pbc_datagen.parallel_tempering import PTEngine
-
-_LOG_FILE: str | None = None
-
-
-def _worker_init(log_file: str | None) -> None:
-    """Pool initializer: set up loguru in worker processes.
-
-    Forked workers inherit handler objects but the enqueue background
-    thread dies on fork.  Set up fresh handlers in each worker.
-    """
-    import sys
-
-    logger.remove()
-    logger.enable("pbc_datagen")
-
-    fmt_plain = "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {message}"
-    fmt_color = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | {message}"
-    logger.add(sys.stdout, format=fmt_color, level="INFO", colorize=True)
-    if log_file is not None:
-        logger.add(log_file, format=fmt_plain, level="DEBUG")
-
 
 _VALID_MODELS: set[str] = {"ising", "blume_capel", "ashkin_teller"}
 
@@ -184,6 +163,16 @@ def run_campaign(
         return path
 
 
+def set_omp_threads(n_threads: int) -> None:
+    """Set OMP_NUM_THREADS before any C++ code runs.
+
+    Must be called before the first pybind11 call that triggers an
+    OpenMP parallel region — the thread pool is created once and reused.
+    """
+    os.environ["OMP_NUM_THREADS"] = str(n_threads)
+    logger.debug("OMP_NUM_THREADS={}", n_threads)
+
+
 def generate_dataset(
     model_type: str,
     L: int,
@@ -191,22 +180,18 @@ def generate_dataset(
     T_range: tuple[float, float],
     n_replicas: int = 20,
     n_snapshots: int = 100,
-    max_workers: int = 4,
     output_dir: str | Path = "output/",
     force_new: bool = False,
-    log_file: str | None = None,
 ) -> None:
-    """Distribute param values across workers via multiprocessing.Pool."""
+    """Run PT campaigns sequentially for each param value.
+
+    Parallelism comes from OpenMP inside the C++ sweep loop, not from
+    Python multiprocessing.  Call ``set_omp_threads()`` before this
+    function to control the thread count.
+    """
     logger.info(
-        "Generating dataset: {} param values across {} workers",
+        "Generating dataset: {} param values (sequential, OpenMP sweeps)",
         len(param_values),
-        max_workers,
     )
-    with Pool(max_workers, initializer=_worker_init, initargs=(log_file,)) as pool:
-        pool.starmap(
-            run_campaign,
-            [
-                (model_type, L, p, T_range, n_replicas, n_snapshots, output_dir, force_new)
-                for p in param_values
-            ],
-        )
+    for p in param_values:
+        run_campaign(model_type, L, p, T_range, n_replicas, n_snapshots, output_dir, force_new)

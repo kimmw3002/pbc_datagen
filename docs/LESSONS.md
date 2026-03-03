@@ -17,6 +17,19 @@ Hard-won insights from building this codebase. Read this before writing new code
   Only 3 energy levels (E = -8, 0, +8). Chi-squared test against exact P(E) at multiple
   temperatures is the definitive check for detailed balance.
 
+- **1D PT fails at the Blume-Capel first-order line — even below D_tcp.**
+  At L=64, D=1.93, T=0.3 (below the infinite-size tricritical point D_tcp ≈ 1.965),
+  the 1D PT ladder completely splits. The log (`run_20260302_224932.log`) shows only
+  2/50 temperature slots ever receive data — exchanges are exponentially suppressed
+  across the energy gap. Cold-start chains stay locked in the ordered phase
+  (E ≈ −277, |m| ≈ 1.0, Q ≈ 1.0) while random-start chains stay in the vacancy
+  phase (E ≈ +29, |m| ≈ 0.001, Q ≈ 0.004). Neither explores the other basin over
+  10⁶ sweeps. See `scripts/blume_capel_L64_T0.3_D1.93.png` (cold) and
+  `scripts/blume_capel_L64_T0.3_D1.93_random.png` (random). Suspected cause:
+  finite-size shift of the tricritical point — at L=64 the effective D_tcp is lower
+  than the thermodynamic-limit value, so D=1.93 is already in the first-order regime.
+  This is the motivating failure for 2D parameter-space PT (Phase 3).
+
 ## Statistics / Testing
 
 - **Chi-squared requires expected counts >= 5 per bin.** At low T the rare states (e.g. E=+8)
@@ -59,3 +72,14 @@ Hard-won insights from building this codebase. Read this before writing new code
 - **Use explicit stack, not recursion, for DFS** on lattice clusters. Recursive DFS can
   blow the call stack on large lattices (256×256 = 65k deep). `std::vector<int>` as a
   stack lives on the heap and grows as needed.
+
+- **OpenMP `if` clause is essential for small workloads.** `#pragma omp parallel for if(M >= 8)`
+  skips thread-pool creation when the loop count is tiny (tests use M=3). Without the guard,
+  tests freeze — the thread pool spins on 3 iterations and the overhead dwarfs the work.
+  Production (M=20–50) benefits; tests run single-threaded with zero overhead.
+
+- **OpenMP default thread count can be catastrophic.** On a 22-core machine, letting OpenMP
+  auto-detect causes 2× *slowdown* vs single-threaded (cache thrashing, memory bandwidth
+  saturation). Benchmarked L=64, 50 replicas, 200 rounds: 4 threads = 0.33s (2.6× speedup),
+  22 threads = 1.99s (0.4× of single-threaded). Fix: default `OMP_NUM_THREADS=4` in the
+  orchestrator, let the user override via `--threads`.
