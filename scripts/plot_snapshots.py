@@ -99,14 +99,15 @@ def main() -> None:
                 [(*parse_slot_2d(name, param_label), name) for name in f if name.startswith("T=")],
                 key=lambda x: (x[1], x[0]),  # param, then T
             )
-            slot_iter = [(T_val, pv, gname) for T_val, pv, gname in slots]
+            # Round to 4 d.p. so filters work on old files with raw-float group names
+            slot_iter = [(round(T_val, 4), round(pv, 4), gname) for T_val, pv, gname in slots]
         else:
             param_value = f.attrs["param_value"]
             t_groups = sorted(
                 [(parse_temperature(name), name) for name in f if name.startswith("T=")],
                 key=lambda x: x[0],
             )
-            slot_iter = [(T_val, param_value, gname) for T_val, gname in t_groups]
+            slot_iter = [(round(T_val, 4), param_value, gname) for T_val, gname in t_groups]
 
         # --list: print available values and exit
         if args.list:
@@ -123,12 +124,12 @@ def main() -> None:
                 print(f"param value: {params[0]}")
             return
 
-        # Apply optional filters (group names are already 4 d.p.)
+        # Apply optional filters (round CLI values to 4 d.p. to match)
         if args.T is not None:
-            t_set = set(args.T)
+            t_set = {round(t, 4) for t in args.T}
             slot_iter = [(T_val, pv, gname) for T_val, pv, gname in slot_iter if T_val in t_set]
         if args.param is not None:
-            p_set = set(args.param)
+            p_set = {round(p, 4) for p in args.param}
             slot_iter = [(T_val, pv, gname) for T_val, pv, gname in slot_iter if pv in p_set]
 
         for T_val, pv, gname in slot_iter:
