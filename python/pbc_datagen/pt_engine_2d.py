@@ -102,6 +102,27 @@ def _randomize_all(
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _log_acceptance(result: _core.PT2DResult, label: str) -> None:
+    """Log mean T- and P-direction exchange acceptance rates at DEBUG level."""
+    t_acc = np.array(result["t_accepts"], dtype=np.float64)
+    t_att = np.array(result["t_attempts"], dtype=np.float64)
+    p_acc = np.array(result["p_accepts"], dtype=np.float64)
+    p_att = np.array(result["p_attempts"], dtype=np.float64)
+    t_rate = float(t_acc.sum() / t_att.sum()) if t_att.sum() > 0 else 0.0
+    p_rate = float(p_acc.sum() / p_att.sum()) if p_att.sum() > 0 else 0.0
+    logger.debug(
+        "  {} accept: T={:.3f}  P={:.3f}",
+        label,
+        t_rate,
+        p_rate,
+    )
+
+
+# ---------------------------------------------------------------------------
 # PTEngine2D
 # ---------------------------------------------------------------------------
 
@@ -198,7 +219,7 @@ class PTEngine2D:
 
     def check_connectivity(
         self,
-        n_rounds: int = 10_000,
+        n_rounds: int = 100,
         min_gap: float | None = None,
     ) -> None:
         """Phase A: run exchanges and verify spectral connectivity.
@@ -250,8 +271,8 @@ class PTEngine2D:
 
     def equilibrate(
         self,
-        n_initial: int = 10_000,
-        n_max: int = 5_120_000,
+        n_initial: int = 100,
+        n_max: int = 51200,
         alpha: float = 0.05,
     ) -> None:
         """Phase B: two-initialization convergence check + τ_int measurement.
@@ -269,31 +290,40 @@ class PTEngine2D:
         logger.info("Phase B: two-initialization convergence check")
         n_rounds = n_initial
 
+        # Create replicas once — they are mutated in-place across doubling iterations
+        replicas_cold, rng_cold = _make_replicas_2d(
+            self.model_type, self.L, self.M, self.seed, init="cold"
+        )
+        r2s_cold = list(range(self.M))
+        s2r_cold = list(range(self.M))
+
+        replicas_hot, rng_hot = _make_replicas_2d(
+            self.model_type, self.L, self.M, self.seed + 1, init="random"
+        )
+        r2s_hot = list(range(self.M))
+        s2r_hot = list(range(self.M))
+
         while n_rounds <= n_max:
-            logger.debug("Phase B: running n_rounds={}", n_rounds)
-
-            # Cold-start run
-            replicas_cold, rng_cold = _make_replicas_2d(
-                self.model_type, self.L, self.M, self.seed, init="cold"
-            )
-            r2s_cold = list(range(self.M))
-            s2r_cold = list(range(self.M))
-
+            logger.debug("Phase B: cold run — n_rounds={}", n_rounds)
             result_cold = self._run_pt(replicas_cold, r2s_cold, s2r_cold, n_rounds, rng_cold, True)
+            _log_acceptance(result_cold, label="cold")
 
-            # Random-start run (different seed)
-            replicas_hot, rng_hot = _make_replicas_2d(
-                self.model_type, self.L, self.M, self.seed + 1, init="random"
-            )
-            r2s_hot = list(range(self.M))
-            s2r_hot = list(range(self.M))
-
+            logger.debug("Phase B: hot run — n_rounds={}", n_rounds)
             result_hot = self._run_pt(replicas_hot, r2s_hot, s2r_hot, n_rounds, rng_hot, True)
+            _log_acceptance(result_hot, label="hot")
 
             # Compare
             obs_cold: dict[str, list[list[float]]] = result_cold["obs_streams"]
             obs_hot: dict[str, list[list[float]]] = result_hot["obs_streams"]
+            n_tests = len(obs_cold) * len(obs_cold[next(iter(obs_cold))])
+            logger.debug("Phase B: convergence_check — {} (obs × slots) tests", n_tests)
             conv = convergence_check(obs_cold, obs_hot, alpha)
+            n_disagree_total = sum(sum(flags) for flags in conv.disagreement_map.values())
+            logger.debug(
+                "Phase B: convergence_check done — {}/{} slots disagree",
+                n_disagree_total,
+                n_tests,
+            )
 
             if conv.converged:
                 logger.info("Phase B: converged at n_rounds={}", n_rounds)
@@ -309,7 +339,11 @@ class PTEngine2D:
                 _, self.tau_max = tau_int_multi(trimmed)
                 logger.info("Phase B: tau_max={:.1f}", self.tau_max)
 
-                # self.replicas have been running since Phase A — keep them
+                # Hand the warm cold-start replicas to Phase C
+                self.replicas = replicas_cold
+                self.r2s = r2s_cold
+                self.s2r = s2r_cold
+                self.rng = rng_cold
                 return
 
             # Log disagreement map

@@ -76,6 +76,59 @@ def tau_int(x: npt.NDArray[np.float64]) -> float:
     return float(total)
 
 
+def tau_int_batch(
+    X: npt.NDArray[np.float64],
+    chunk_size: int = 10_000,
+) -> npt.NDArray[np.float64]:
+    """Integrated autocorrelation time for every row of X.
+
+    Vectorised version of tau_int: processes all series in parallel via
+    numpy's batched FFT (Wiener-Khinchin), then finds first-zero-crossing
+    with a cumprod mask — no Python loops over rows.
+
+    Parameters
+    ----------
+    X : (n_series, n_samples) array
+    chunk_size : int
+        Rows processed per batch to cap peak memory.  Default 10 000
+        (≈ 10 000 × n × 24 bytes ≈ 12 MB for n=50).
+
+    Returns
+    -------
+    (n_series,) array of tau_int values.  Constant rows (std == 0) get 0.5.
+    """
+    n_series, n = X.shape
+    result = np.empty(n_series)
+
+    for start in range(0, n_series, chunk_size):
+        chunk = X[start : start + chunk_size]  # (C, n)
+        mu = chunk.mean(axis=1, keepdims=True)
+        xc = chunk - mu  # centered
+
+        var = (xc * xc).sum(axis=1)  # (C,)
+        const_mask = var == 0.0  # constant series
+
+        # Batch Wiener-Khinchin via rfft (real input → half spectrum)
+        ft = np.fft.rfft(xc, n=2 * n, axis=1)  # (C, n+1) complex
+        power = ft.real**2 + ft.imag**2
+        acf_raw = np.fft.irfft(power, n=2 * n, axis=1)[:, :n]  # (C, n) real
+        # Normalize: acf[0] == var; divide only non-constant rows
+        safe_var = np.where(const_mask, 1.0, var)
+        rho = acf_raw / safe_var[:, None]  # (C, n)
+
+        # Vectorised first-zero-crossing cumsum
+        # mask[t] = 1 while rho[:,1:t+1] > 0, then 0
+        positive = (rho[:, 1:] > 0).astype(np.float64)  # (C, n-1)
+        mask = np.cumprod(positive, axis=1)  # turns 0 at first crossing
+        tau = 0.5 + (rho[:, 1:] * mask).sum(axis=1)  # (C,)
+        tau[const_mask] = 0.5  # sentinel for constant
+
+        end = start + len(chunk)
+        result[start:end] = tau
+
+    return result
+
+
 def tau_int_multi(
     sweep_dict: dict[str, npt.NDArray[np.float64]],
 ) -> tuple[dict[str, float], float]:

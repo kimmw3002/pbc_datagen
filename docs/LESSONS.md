@@ -83,3 +83,16 @@ Hard-won insights from building this codebase. Read this before writing new code
   saturation). Benchmarked L=64, 50 replicas, 200 rounds: 4 threads = 0.33s (2.6× speedup),
   22 threads = 1.99s (0.4× of single-threaded). Fix: default `OMP_NUM_THREADS=4` in the
   orchestrator, let the user override via `--threads`.
+
+- **Optimal thread count is model-dependent.** Blume-Capel sweeps are heavier than Ising
+  (3-state spin + crystal field term), so the workload is more CPU-bound and scales to more
+  threads before memory bandwidth saturates. Benchmarked on Xeon E5-2696 v4 (22 cores,
+  DDR4 4-channel), BlumeCapel L=64, 20 replicas, 500 rounds: optimal at **10 threads (7.3×
+  speedup)**; 12 threads nearly identical; 16 threads degrades (6.0×). Ising L=64 optimal
+  was 4 threads on the same hardware. Rule of thumb: benchmark per model, not per machine.
+
+- **`find_package(OpenMP)` can silently fail under scikit-build-core**, producing a binary
+  where all `#pragma omp` directives are no-ops. The bug is invisible at runtime — code runs
+  single-threaded regardless of `--threads`. Fix in `CMakeLists.txt`: add a GCC/Clang
+  `-fopenmp` fallback after `find_package`, and `FATAL_ERROR` if neither path works.
+  Diagnose with `ldd _core*.so | grep gomp` — empty output means OpenMP was not linked.

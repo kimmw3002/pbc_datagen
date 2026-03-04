@@ -22,10 +22,23 @@ pybind11_add_module(_core
 
 target_include_directories(_core PRIVATE src/cpp/include)
 
-# Link OpenMP if available — enables #pragma omp in PT sweep loops.
-# If not found, the pragmas are silently ignored and everything runs single-threaded.
+# Link OpenMP — enables #pragma omp in PT sweep loops.
+# find_package(OpenMP) is tried first (portable). If cmake's detection fails
+# (common with scikit-build-core on some Linux setups), fall back to the GCC
+# -fopenmp flag directly, which links libgomp automatically.
+# FATAL_ERROR if neither works: a silently single-threaded binary is worse
+# than a build failure because the bug is invisible at runtime.
 if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found via find_package — linking OpenMP::OpenMP_CXX")
     target_link_libraries(_core PRIVATE OpenMP::OpenMP_CXX)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    message(STATUS "find_package(OpenMP) failed — applying -fopenmp directly (GCC/Clang fallback)")
+    target_compile_options(_core PRIVATE -fopenmp)
+    target_link_options(_core PRIVATE -fopenmp)
+else()
+    message(FATAL_ERROR
+        "OpenMP not found and no -fopenmp fallback available for compiler '${CMAKE_CXX_COMPILER_ID}'.\n"
+        "Install libomp-dev (apt) or equivalent, then rebuild.")
 endif()
 
 install(TARGETS _core DESTINATION pbc_datagen)

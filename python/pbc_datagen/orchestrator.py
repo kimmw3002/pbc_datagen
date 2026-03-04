@@ -215,7 +215,7 @@ def run_campaign_2d(
     n_snapshots: int,
     output_dir: str | Path,
     force_new: bool = False,
-    connectivity_rounds: int = 10_000,
+    connectivity_rounds: int = 100,
 ) -> Path:
     """Run one 2D PT campaign covering the full (T, param) grid.
 
@@ -302,7 +302,7 @@ def generate_dataset_2d(
     n_snapshots: int = 100,
     output_dir: str | Path = "output/",
     force_new: bool = False,
-    connectivity_rounds: int = 10_000,
+    connectivity_rounds: int = 100,
 ) -> None:
     """Run a single 2D PT campaign covering the full (T, param) grid.
 
