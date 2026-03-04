@@ -18,15 +18,13 @@ Algorithm per (observable, slot):
 
 from __future__ import annotations
 
-import math
 import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
-import numpy.typing as npt
 from scipy import stats
 
-from pbc_datagen.autocorrelation import tau_int
+from pbc_datagen.autocorrelation import tau_int_batch
 
 _WELCH_ATOL: float = 1e-12
 _WELCH_RTOL: float = 1e-10
@@ -77,77 +75,68 @@ def convergence_check(
     n_tests = len(obs_names) * n_slots
     threshold = alpha / n_tests  # Bonferroni
 
-    disagreement_map: dict[str, list[bool]] = {name: [False] * n_slots for name in obs_names}
+    disagreement_map: dict[str, list[bool]] = {}
 
     for name in obs_names:
-        for s in range(n_slots):
-            series_a = streams_a[name][s]
-            series_b = streams_b[name][s]
+        # --- 1. Convert list-of-lists → 2D ndarray ONCE (not per slot) ---
+        raw_a = np.array(streams_a[name], dtype=np.float64)  # (n_slots, n_rounds)
+        raw_b = np.array(streams_b[name], dtype=np.float64)
 
-            if _slot_disagrees(series_a, series_b, threshold):
-                disagreement_map[name][s] = True
+        # --- 2. Burn-in discard (first half) ---
+        half = raw_a.shape[1] // 2
+        tails_a = raw_a[:, half:]  # (n_slots, n_tail)
+        tails_b = raw_b[:, half:]
+
+        n_tail = tails_a.shape[1]
+        if n_tail < 10:  # matches former _slot_disagrees guard
+            disagreement_map[name] = [True] * n_slots
+            continue
+
+        # --- 3. Vectorised variance-floor guard ---
+        std_a = tails_a.std(axis=1)  # (n_slots,)
+        std_b = tails_b.std(axis=1)
+        scale = np.maximum(np.abs(tails_a.mean(axis=1)), np.abs(tails_b.mean(axis=1)))
+        tol = _WELCH_ATOL + _WELCH_RTOL * scale
+        trivial = (std_a < tol) & (std_b < tol)  # agree without testing
+
+        # --- 4. Batch tau_int for all non-trivial slots ---
+        active = ~trivial
+        disagrees = np.zeros(n_slots, dtype=bool)  # default: agree
+
+        if active.any():
+            tau_a = tau_int_batch(tails_a[active])  # (n_active,)
+            tau_b = tau_int_batch(tails_b[active])
+            block_sizes = np.maximum(1, np.ceil(3.0 * np.maximum(tau_a, tau_b))).astype(
+                int
+            )  # (n_active,)
+
+            # --- 5. Group by block_size → batch ttest_ind per group ---
+            da = np.zeros(active.sum(), dtype=bool)  # disagrees for active slots
+
+            for bs in np.unique(block_sizes):
+                grp = block_sizes == bs  # mask within active
+                n_blocks = n_tail // bs
+                if n_blocks < 5:  # too few blocks → disagree
+                    da[grp] = True
+                    continue
+                # Block means: (n_grp, n_blocks)
+                n_grp = int(grp.sum())
+                ba = tails_a[active][grp, : n_blocks * bs].reshape(n_grp, n_blocks, bs).mean(axis=2)
+                bb = tails_b[active][grp, : n_blocks * bs].reshape(n_grp, n_blocks, bs).mean(axis=2)
+                # scipy ttest_ind broadcasts over rows when axis=1
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")
+                    _, p_raw = stats.ttest_ind(ba, bb, axis=1, equal_var=False)
+                p_arr = np.asarray(p_raw, dtype=float)
+                p_arr = np.where(np.isnan(p_arr), 1.0, p_arr)
+                da[grp] = p_arr < threshold
+
+            disagrees[active] = da
+
+        disagreement_map[name] = disagrees.tolist()
 
     any_disagree = any(any(flags) for flags in disagreement_map.values())
     return ConvergenceResult(
         converged=not any_disagree,
         disagreement_map=disagreement_map,
     )
-
-
-def _slot_disagrees(
-    series_a: list[float],
-    series_b: list[float],
-    threshold: float,
-) -> bool:
-    """Test whether two streams at one slot have different means.
-
-    Returns True if the two streams disagree (different distributions).
-    """
-    # Discard first half (burn-in)
-    half_a = len(series_a) // 2
-    half_b = len(series_b) // 2
-    tail_a = np.asarray(series_a[half_a:], dtype=np.float64)
-    tail_b = np.asarray(series_b[half_b:], dtype=np.float64)
-
-    if len(tail_a) < 10 or len(tail_b) < 10:
-        # Too few samples — can't tell, assume disagree
-        return True
-
-    # Variance-floor guard: skip t-test for trivially constant data
-    std_a, std_b = float(np.std(tail_a)), float(np.std(tail_b))
-    scale = max(abs(float(np.mean(tail_a))), abs(float(np.mean(tail_b))))
-    tol = _WELCH_ATOL + _WELCH_RTOL * scale
-    if std_a < tol and std_b < tol:
-        return False  # both constant with same value → agree
-
-    # Estimate τ_int from each tail; use the larger one for blocking
-    tau_a = tau_int(tail_a)
-    tau_b = tau_int(tail_b)
-    block_size = max(1, math.ceil(3 * max(tau_a, tau_b)))
-
-    # Block into approximately-independent batch means
-    blocks_a = _block_means(tail_a, block_size)
-    blocks_b = _block_means(tail_b, block_size)
-
-    if len(blocks_a) < 5 or len(blocks_b) < 5:
-        # Not enough independent blocks — can't tell, assume disagree
-        return True
-
-    # Welch t-test on batch means
-    with warnings.catch_warnings(record=True):
-        warnings.simplefilter("always")
-        _, p_value = stats.ttest_ind(blocks_a, blocks_b, equal_var=False)
-
-    p = float(p_value)  # type: ignore[arg-type]
-    if math.isnan(p):
-        return False  # NaN p-value → treat as agreeing
-
-    return p < threshold
-
-
-def _block_means(arr: npt.NDArray[np.float64], block_size: int) -> npt.NDArray[np.float64]:
-    """Average contiguous blocks of ``block_size`` samples."""
-    n_blocks = len(arr) // block_size
-    if n_blocks == 0:
-        return arr[:0]  # empty array
-    return arr[: n_blocks * block_size].reshape(n_blocks, block_size).mean(axis=1)

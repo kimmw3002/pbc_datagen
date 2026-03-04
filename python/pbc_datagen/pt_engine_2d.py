@@ -102,6 +102,27 @@ def _randomize_all(
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _log_acceptance(result: _core.PT2DResult, label: str) -> None:
+    """Log mean T- and P-direction exchange acceptance rates at DEBUG level."""
+    t_acc = np.array(result["t_accepts"], dtype=np.float64)
+    t_att = np.array(result["t_attempts"], dtype=np.float64)
+    p_acc = np.array(result["p_accepts"], dtype=np.float64)
+    p_att = np.array(result["p_attempts"], dtype=np.float64)
+    t_rate = float(t_acc.sum() / t_att.sum()) if t_att.sum() > 0 else 0.0
+    p_rate = float(p_acc.sum() / p_att.sum()) if p_att.sum() > 0 else 0.0
+    logger.debug(
+        "  {} accept: T={:.3f}  P={:.3f}",
+        label,
+        t_rate,
+        p_rate,
+    )
+
+
+# ---------------------------------------------------------------------------
 # PTEngine2D
 # ---------------------------------------------------------------------------
 
@@ -283,15 +304,26 @@ class PTEngine2D:
         s2r_hot = list(range(self.M))
 
         while n_rounds <= n_max:
-            logger.debug("Phase B: running n_rounds={}", n_rounds)
-
+            logger.debug("Phase B: cold run — n_rounds={}", n_rounds)
             result_cold = self._run_pt(replicas_cold, r2s_cold, s2r_cold, n_rounds, rng_cold, True)
+            _log_acceptance(result_cold, label="cold")
+
+            logger.debug("Phase B: hot run — n_rounds={}", n_rounds)
             result_hot = self._run_pt(replicas_hot, r2s_hot, s2r_hot, n_rounds, rng_hot, True)
+            _log_acceptance(result_hot, label="hot")
 
             # Compare
             obs_cold: dict[str, list[list[float]]] = result_cold["obs_streams"]
             obs_hot: dict[str, list[list[float]]] = result_hot["obs_streams"]
+            n_tests = len(obs_cold) * len(obs_cold[next(iter(obs_cold))])
+            logger.debug("Phase B: convergence_check — {} (obs × slots) tests", n_tests)
             conv = convergence_check(obs_cold, obs_hot, alpha)
+            n_disagree_total = sum(sum(flags) for flags in conv.disagreement_map.values())
+            logger.debug(
+                "Phase B: convergence_check done — {}/{} slots disagree",
+                n_disagree_total,
+                n_tests,
+            )
 
             if conv.converged:
                 logger.info("Phase B: converged at n_rounds={}", n_rounds)

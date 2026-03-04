@@ -183,3 +183,35 @@ def test_tau_int_multi_returns_per_key_and_bottleneck() -> None:
     assert tau_max > per_obs["abs_m"], (
         "tau_max should be strictly larger than the fast observable's tau_int"
     )
+
+
+# ---------------------------------------------------------------------------
+# tau_int_batch tests
+# ---------------------------------------------------------------------------
+
+
+def test_tau_int_batch_matches_sequential() -> None:
+    """tau_int_batch must agree with sequential tau_int on each row."""
+    from pbc_datagen.autocorrelation import tau_int, tau_int_batch
+
+    rng = np.random.default_rng(42)
+    n_series, n = 200, 500
+    phi = 0.7
+    X = np.zeros((n_series, n))
+    X[:, 0] = rng.standard_normal(n_series)
+    for t in range(1, n):
+        X[:, t] = phi * X[:, t - 1] + rng.standard_normal(n_series)
+
+    batch_result = tau_int_batch(X)
+    seq_result = np.array([tau_int(X[i]) for i in range(n_series)])
+
+    np.testing.assert_allclose(batch_result, seq_result, rtol=1e-10)
+
+
+def test_tau_int_batch_constant_rows() -> None:
+    """Constant rows must return 0.5 (the sentinel value)."""
+    from pbc_datagen.autocorrelation import tau_int_batch
+
+    X = np.ones((50, 100))
+    result = tau_int_batch(X)
+    np.testing.assert_allclose(result, 0.5)
