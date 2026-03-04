@@ -100,8 +100,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--connectivity-rounds",
         type=int,
-        default=10_000,
-        help="2D PT Phase A: exchange rounds for connectivity check (default: 10000)",
+        default=100,
+        help="2D PT Phase A: exchange rounds for connectivity check (default: 100)",
     )
     parser.add_argument(
         "--threads", type=int, default=4, help="OpenMP threads for C++ sweep loop (default: 4)"

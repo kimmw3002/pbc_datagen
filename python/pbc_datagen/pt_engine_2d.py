@@ -198,7 +198,7 @@ class PTEngine2D:
 
     def check_connectivity(
         self,
-        n_rounds: int = 10_000,
+        n_rounds: int = 100,
         min_gap: float | None = None,
     ) -> None:
         """Phase A: run exchanges and verify spectral connectivity.
@@ -250,8 +250,8 @@ class PTEngine2D:
 
     def equilibrate(
         self,
-        n_initial: int = 10_000,
-        n_max: int = 5_120_000,
+        n_initial: int = 100,
+        n_max: int = 51200,
         alpha: float = 0.05,
     ) -> None:
         """Phase B: two-initialization convergence check + τ_int measurement.
@@ -269,25 +269,23 @@ class PTEngine2D:
         logger.info("Phase B: two-initialization convergence check")
         n_rounds = n_initial
 
+        # Create replicas once — they are mutated in-place across doubling iterations
+        replicas_cold, rng_cold = _make_replicas_2d(
+            self.model_type, self.L, self.M, self.seed, init="cold"
+        )
+        r2s_cold = list(range(self.M))
+        s2r_cold = list(range(self.M))
+
+        replicas_hot, rng_hot = _make_replicas_2d(
+            self.model_type, self.L, self.M, self.seed + 1, init="random"
+        )
+        r2s_hot = list(range(self.M))
+        s2r_hot = list(range(self.M))
+
         while n_rounds <= n_max:
             logger.debug("Phase B: running n_rounds={}", n_rounds)
 
-            # Cold-start run
-            replicas_cold, rng_cold = _make_replicas_2d(
-                self.model_type, self.L, self.M, self.seed, init="cold"
-            )
-            r2s_cold = list(range(self.M))
-            s2r_cold = list(range(self.M))
-
             result_cold = self._run_pt(replicas_cold, r2s_cold, s2r_cold, n_rounds, rng_cold, True)
-
-            # Random-start run (different seed)
-            replicas_hot, rng_hot = _make_replicas_2d(
-                self.model_type, self.L, self.M, self.seed + 1, init="random"
-            )
-            r2s_hot = list(range(self.M))
-            s2r_hot = list(range(self.M))
-
             result_hot = self._run_pt(replicas_hot, r2s_hot, s2r_hot, n_rounds, rng_hot, True)
 
             # Compare
@@ -309,7 +307,11 @@ class PTEngine2D:
                 _, self.tau_max = tau_int_multi(trimmed)
                 logger.info("Phase B: tau_max={:.1f}", self.tau_max)
 
-                # self.replicas have been running since Phase A — keep them
+                # Hand the warm cold-start replicas to Phase C
+                self.replicas = replicas_cold
+                self.r2s = r2s_cold
+                self.s2r = s2r_cold
+                self.rng = rng_cold
                 return
 
             # Log disagreement map
