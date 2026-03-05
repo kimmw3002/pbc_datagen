@@ -209,12 +209,14 @@ def main() -> None:
                     grid[pi, ti] = mean[ix]
 
             fig_h, ax_h = plt.subplots(figsize=(8, 6))
+            clim = {"vmin": 0, "vmax": 1} if obs in ("abs_m", "q", "abs_m_sigma", "abs_m_tau", "abs_m_baxter") else {}
             im = ax_h.imshow(
                 grid,
                 aspect="auto",
                 origin="lower",
                 extent=(t_vals[0], t_vals[-1], param_vals[0], param_vals[-1]),
                 cmap="RdBu_r",
+                **clim,
             )
             ax_h.set_xlabel("T")
             ax_h.set_ylabel(param_label)
