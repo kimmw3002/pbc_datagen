@@ -83,6 +83,11 @@ def main() -> None:
     parser.add_argument(
         "--list", action="store_true", help="List available T/param values and exit"
     )
+    parser.add_argument(
+        "--rigorous",
+        action="store_true",
+        help="Exclude unconverged slots flagged in HDF5 from plots.",
+    )
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -96,6 +101,21 @@ def main() -> None:
 
         # Detect flat vs old per-group schema
         is_flat = "slot_keys" in f.attrs
+        _ds = f.get("disagreement_slots") or f.attrs.get("disagreement_slots", [])
+        _disagree_indices: list[int] = list(np.asarray(_ds, dtype=int).tolist())
+        if is_flat and _disagree_indices:
+            _all_keys: list[str] = json.loads(str(f.attrs["slot_keys"]))
+            disagree_slot_keys: list[str] = [_all_keys[i] for i in _disagree_indices]
+        else:
+            disagree_slot_keys = []
+        if disagree_slot_keys:
+            import warnings
+
+            warnings.warn(
+                f"HDF5 contains {len(disagree_slot_keys)} unconverged slot(s) "
+                f"(Phase B soft failure). Pass --rigorous to exclude them.",
+                stacklevel=2,
+            )
 
         if is_flat:
             slot_keys = json.loads(str(f.attrs["slot_keys"]))
@@ -138,6 +158,11 @@ def main() -> None:
             if args.param is not None:
                 p_set = {round(p, 4) for p in args.param}
                 slot_iter_raw = [(T, pv, i) for T, pv, i in slot_iter_raw if pv in p_set]
+            if args.rigorous and disagree_slot_keys:
+                _excl = set(disagree_slot_keys)
+                slot_iter_raw = [
+                    (T, pv, i) for T, pv, i in slot_iter_raw if slot_keys[i] not in _excl
+                ]
 
             for T_val, pv, slot_idx in slot_iter_raw:
                 snap_data = snaps_ds[slot_idx, :count]  # (count, C, L, L)

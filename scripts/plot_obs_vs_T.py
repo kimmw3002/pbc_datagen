@@ -36,6 +36,11 @@ def main() -> None:
     parser.add_argument("--obs", nargs="+", help="Observable names to plot (default: all)")
     parser.add_argument("-o", "--output", type=Path, help="Output PNG path (default: auto)")
     parser.add_argument("--no-show", action="store_true", help="Skip plt.show()")
+    parser.add_argument(
+        "--rigorous",
+        action="store_true",
+        help="Exclude unconverged slots flagged in HDF5 from plots.",
+    )
     args = parser.parse_args()
 
     with h5py.File(args.hdf5, "r") as f:
@@ -43,6 +48,21 @@ def main() -> None:
         L = f.attrs["L"]
         is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
         is_flat = "slot_keys" in f.attrs
+        _ds = f.get("disagreement_slots") or f.attrs.get("disagreement_slots", [])
+        _disagree_indices: list[int] = list(np.asarray(_ds, dtype=int).tolist())
+        if is_flat and _disagree_indices:
+            _all_keys: list[str] = json.loads(str(f.attrs["slot_keys"]))
+            disagree_slot_keys: list[str] = [_all_keys[i] for i in _disagree_indices]
+        else:
+            disagree_slot_keys = []
+        if disagree_slot_keys:
+            import warnings
+
+            warnings.warn(
+                f"HDF5 contains {len(disagree_slot_keys)} unconverged slot(s) "
+                f"(Phase B soft failure). Pass --rigorous to exclude them.",
+                stacklevel=2,
+            )
 
         if is_flat:
             slot_keys = json.loads(str(f.attrs["slot_keys"]))
@@ -58,6 +78,9 @@ def main() -> None:
                     T_val, pv = parse_slot_2d(key, param_label)
                     slots.append((T_val, pv, i))
                 slots.sort(key=lambda x: (x[1], x[0]))
+                if args.rigorous and disagree_slot_keys:
+                    _excl = set(disagree_slot_keys)
+                    slots = [(t, pv, i) for t, pv, i in slots if slot_keys[i] not in _excl]
 
                 param_vals = sorted(set(s[1] for s in slots))
                 data_2d: dict[str, dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
@@ -81,6 +104,9 @@ def main() -> None:
                     T_val = parse_temperature(key)
                     t_slots.append((T_val, i))
                 t_slots.sort(key=lambda x: x[0])
+                if args.rigorous and disagree_slot_keys:
+                    _excl = set(disagree_slot_keys)
+                    t_slots = [(t, i) for t, i in t_slots if slot_keys[i] not in _excl]
 
                 temps = np.array([t for t, _ in t_slots])
                 data_1d: dict[str, tuple[np.ndarray, np.ndarray]] = {}
@@ -209,14 +235,17 @@ def main() -> None:
                     grid[pi, ti] = mean[ix]
 
             fig_h, ax_h = plt.subplots(figsize=(8, 6))
-            clim = {"vmin": 0, "vmax": 1} if obs in ("abs_m", "q", "abs_m_sigma", "abs_m_tau", "abs_m_baxter") else {}
+            abs_obs = ("abs_m", "q", "abs_m_sigma", "abs_m_tau", "abs_m_baxter")
+            vmin: float | None = 0 if obs in abs_obs else None
+            vmax: float | None = 1 if obs in abs_obs else None
             im = ax_h.imshow(
                 grid,
                 aspect="auto",
                 origin="lower",
                 extent=(t_vals[0], t_vals[-1], param_vals[0], param_vals[-1]),
                 cmap="RdBu_r",
-                **clim,
+                vmin=vmin,
+                vmax=vmax,
             )
             ax_h.set_xlabel("T")
             ax_h.set_ylabel(param_label)
