@@ -77,6 +77,14 @@ Hard-won insights from building this codebase. Read this before writing new code
   Fix: `write_round()` checks `count >= shape[1]` and doubles the dataset via
   `resize(max(n+1, shape*2), axis=1)`. Amortised O(1) per write.
 
+- **HDF5 attributes have a ~64 KB object-header limit.** For a 100×100 (T, D)
+  grid, `r2s`/`s2r` are 10,000-element int64 arrays (80 KB each) and crash
+  `write_metadata()` with "object header message is too large". Fix: route arrays
+  larger than 512 elements to root-level **datasets** instead of attrs
+  (`_ATTR_ELEM_LIMIT = 512`). The reader must try `f["key"]` first, then fall
+  back to `f.attrs["key"]` to handle both old (small grid) and new (large grid)
+  files.
+
 ## C++ / Build
 
 - **Rebuild after C++ changes:** `uv sync --all-extras --reinstall-package pbc-datagen`.

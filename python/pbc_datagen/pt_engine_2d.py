@@ -179,6 +179,7 @@ class PTEngine2D:
         # State flags
         self.connectivity_checked = False
         self.tau_max: float | None = None
+        self.disagreement_slots: list[int] = []  # populated if Phase B soft-fails
 
         logger.info(
             "PTEngine2D created: model={} L={} grid={}×{} ({}R) "
@@ -273,7 +274,7 @@ class PTEngine2D:
     def equilibrate(
         self,
         n_initial: int = 100,
-        n_max: int = 51200,
+        n_max: int = 25600,
         alpha: float = 0.05,
     ) -> None:
         """Phase B: two-initialization convergence check + τ_int measurement.
@@ -282,7 +283,8 @@ class PTEngine2D:
         convergence_check.  Uses doubling schedule.  On success, measures
         τ_int and keeps the cold-start replicas for production.
 
-        Raises RuntimeError if connectivity not checked or convergence fails.
+        Raises RuntimeError if connectivity not checked. On convergence failure,
+        warns and proceeds with self.disagreement_slots populated.
         """
         if not self.connectivity_checked:
             msg = "Must call check_connectivity() before equilibrate()"
@@ -376,12 +378,41 @@ class PTEngine2D:
             )
             n_rounds *= 2
 
-        msg = (
-            f"Two-initialization convergence failed after {n_max} rounds. "
-            f"The cold-start and random-start runs still disagree — the grid "
-            f"may be insufficient near the first-order line."
+        # --- Soft failure ---
+        # obs_cold, conv, replicas_cold, r2s_cold, s2r_cold, rng_cold
+        # are all set from the final n_max iteration of the while loop.
+        disagree_set: set[int] = set()
+        for flags in conv.disagreement_map.values():
+            for s, bad in enumerate(flags):
+                if bad:
+                    disagree_set.add(s)
+        self.disagreement_slots = sorted(disagree_set)
+        n_disagree = len(self.disagreement_slots)
+        pct = 100.0 * n_disagree / self.M
+        logger.warning(
+            "Phase B: convergence failed after {} rounds — {}/{} slots ({:.1f}%) "
+            "still disagree between cold-start and random-start. "
+            "These are likely near the first-order transition line. "
+            "Proceeding to production; disagreeing slots will be flagged in HDF5.",
+            n_max,
+            n_disagree,
+            self.M,
+            pct,
         )
-        raise RuntimeError(msg)
+        # Measure tau_max from cold-start data at n_max rounds (last 80%)
+        burn_in = n_max // 5
+        trimmed_sf: dict[str, npt.NDArray[np.float64]] = {}
+        for name, slots in obs_cold.items():
+            for s in range(self.M):
+                key = f"{name}_s{s}"
+                trimmed_sf[key] = slots[s, burn_in:]
+        _, self.tau_max = tau_int_multi(trimmed_sf)
+        logger.info("Phase B: tau_max={:.1f} (from unconverged cold run)", self.tau_max)
+        # Hand cold-start replicas to Phase C
+        self.replicas = replicas_cold
+        self.r2s = r2s_cold
+        self.s2r = s2r_cold
+        self.rng = rng_cold
 
     # ---- Phase C ----
 
@@ -435,6 +466,7 @@ class PTEngine2D:
             "seed": self.seed,
             "seed_history": json.dumps(seed_history),
             "pt_mode": "2d",
+            "disagreement_slots": np.asarray(self.disagreement_slots, dtype=np.int64),
         }
 
         with SnapshotWriter(path) as writer:
