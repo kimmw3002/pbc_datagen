@@ -288,26 +288,37 @@ PYBIND11_MODULE(_core, m) {
         py::arg("labels"), py::arg("prev_labels"),
         py::arg("t2r"), py::arg("M"));
 
+    // Helper: convert ObsStreams (map<string, vector<vector<double>>>)
+    // to dict[str, ndarray] with shape (n_slots, n_rounds).
+    // Each C++ double maps to one element in a contiguous numpy buffer
+    // instead of a 24-byte Python float object → 4× memory saving.
+    auto obs_streams_to_numpy = [](const pbc::ObsStreams& obs_streams) -> py::dict {
+        py::dict streams;
+        for (auto& [name, slots] : obs_streams) {
+            if (slots.empty()) continue;
+            auto n_slots  = static_cast<py::ssize_t>(slots.size());
+            auto n_rounds = static_cast<py::ssize_t>(slots[0].size());
+            py::array_t<double> arr({n_slots, n_rounds});
+            auto buf = arr.mutable_unchecked<2>();
+            for (py::ssize_t t = 0; t < n_slots; ++t)
+                for (py::ssize_t r = 0; r < n_rounds; ++r)
+                    buf(t, r) = slots[static_cast<size_t>(t)][static_cast<size_t>(r)];
+            streams[py::cast(name)] = arr;
+        }
+        return streams;
+    };
+
     // Helper: convert PTResult to a Python dict.
     // r2t, t2r, labels are NOT included — they're mutated in-place
     // via ivec_to_list in each binding lambda.
-    auto pt_result_to_dict = [](const pbc::PTResult& res) {
+    auto pt_result_to_dict = [&obs_streams_to_numpy](const pbc::PTResult& res) {
         py::dict out;
         out["n_accepts"]        = res.n_accepts;
         out["n_attempts"]       = res.n_attempts;
         out["n_up"]             = res.n_up;
         out["n_down"]           = res.n_down;
         out["round_trip_count"] = res.round_trip_count;
-        // obs_streams: map<string, vector<vector<double>>>
-        //           → dict[str, list[list[float]]]
-        py::dict streams;
-        for (auto& [name, slots] : res.obs_streams) {
-            py::list slot_list;
-            for (auto& s : slots)
-                slot_list.append(py::cast(s));
-            streams[py::cast(name)] = slot_list;
-        }
-        out["obs_streams"] = streams;
+        out["obs_streams"] = obs_streams_to_numpy(res.obs_streams);
         return out;
     };
 
@@ -526,16 +537,9 @@ PYBIND11_MODULE(_core, m) {
 
     // Helper: convert PT2DResult to a Python dict.
     // Only contains obs_streams — no 1D label tracking artifacts.
-    auto pt_2d_result_to_dict = [](const pbc::PT2DResult& res) {
+    auto pt_2d_result_to_dict = [&obs_streams_to_numpy](const pbc::PT2DResult& res) {
         py::dict out;
-        py::dict streams;
-        for (auto& [name, slots] : res.obs_streams) {
-            py::list slot_list;
-            for (auto& s : slots)
-                slot_list.append(py::cast(s));
-            streams[py::cast(name)] = slot_list;
-        }
-        out["obs_streams"] = streams;
+        out["obs_streams"] = obs_streams_to_numpy(res.obs_streams);
         out["t_accepts"]   = res.t_accepts;
         out["t_attempts"]  = res.t_attempts;
         out["p_accepts"]   = res.p_accepts;

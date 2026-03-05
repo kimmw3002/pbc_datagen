@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Union
 
@@ -145,7 +146,7 @@ _WELCH_RTOL: float = 1e-10
 
 
 def welch_equilibration_check(
-    obs_streams: dict[str, list[list[float]]],
+    obs_streams: Mapping[str, npt.NDArray[np.float64] | list[list[float]]],
     alpha: float = 0.05,
 ) -> bool:
     """Check equilibration via Welch's t-test on observable streams.
@@ -571,7 +572,7 @@ class PTEngine:
                 True,  # track observables
             )
 
-            obs_streams: dict[str, list[list[float]]] = result["obs_streams"]
+            obs_streams: dict[str, npt.NDArray[np.float64]] = result["obs_streams"]
 
             # Welch t-test equilibration check
             if welch_equilibration_check(obs_streams, alpha=alpha):
@@ -584,7 +585,7 @@ class PTEngine:
                     # so we pick the bottleneck across all slots
                     for t in range(M):
                         key = f"{name}_T{t}"
-                        trimmed[key] = np.array(slots[t][burn_in:], dtype=np.float64)
+                        trimmed[key] = slots[t, burn_in:]
 
                 _, self.tau_max = tau_int_multi(trimmed)
                 logger.info("Phase B: equilibrated, tau_max={:.1f}", self.tau_max)

@@ -19,9 +19,11 @@ Algorithm per (observable, slot):
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import numpy as np
+import numpy.typing as npt
 from scipy import stats
 
 from pbc_datagen.autocorrelation import tau_int_batch
@@ -48,17 +50,17 @@ class ConvergenceResult:
 
 
 def convergence_check(
-    streams_a: dict[str, list[list[float]]],
-    streams_b: dict[str, list[list[float]]],
+    streams_a: Mapping[str, npt.NDArray[np.float64] | list[list[float]]],
+    streams_b: Mapping[str, npt.NDArray[np.float64] | list[list[float]]],
     alpha: float = 0.05,
 ) -> ConvergenceResult:
     """Compare two independent PT runs for convergence.
 
     Parameters
     ----------
-    streams_a, streams_b : dict[str, list[list[float]]]
-        obs_streams from each run.  ``streams[name][slot]`` is a list
-        of float values (one per PT round).
+    streams_a, streams_b : dict[str, NDArray[float64]]
+        obs_streams from each run.  ``streams[name]`` is a 2D array
+        of shape ``(n_slots, n_rounds)``.
     alpha : float
         Family-wise significance level (default 0.05).
 
@@ -79,8 +81,8 @@ def convergence_check(
 
     for name in obs_names:
         # --- 1. Convert list-of-lists → 2D ndarray ONCE (not per slot) ---
-        raw_a = np.array(streams_a[name], dtype=np.float64)  # (n_slots, n_rounds)
-        raw_b = np.array(streams_b[name], dtype=np.float64)
+        raw_a = np.asarray(streams_a[name], dtype=np.float64)  # (n_slots, n_rounds)
+        raw_b = np.asarray(streams_b[name], dtype=np.float64)
 
         # --- 2. Burn-in discard (first half) ---
         half = raw_a.shape[1] // 2

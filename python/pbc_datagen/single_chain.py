@@ -117,10 +117,10 @@ class SingleChainEngine:
             result = self.model.sweep(n_sweeps)
 
             # Convert sweep result to welch_equilibration_check format:
-            # {obs_name: [series_as_list]} — 1 "T slot"
-            obs_streams: dict[str, list[list[float]]] = {}
+            # {obs_name: ndarray of shape (1, n_sweeps)} — 1 "T slot"
+            obs_streams: dict[str, npt.NDArray[np.float64]] = {}
             for name, values in result.items():
-                obs_streams[name] = [values.tolist()]
+                obs_streams[name] = np.asarray(values, dtype=np.float64).reshape(1, -1)
 
             if welch_equilibration_check(obs_streams, alpha=alpha):
                 logger.debug("Welch test passed at n_sweeps={}", n_sweeps)

@@ -313,11 +313,13 @@ class PTEngine2D:
             _log_acceptance(result_hot, label="hot")
 
             # Compare
-            obs_cold: dict[str, list[list[float]]] = result_cold["obs_streams"]
-            obs_hot: dict[str, list[list[float]]] = result_hot["obs_streams"]
+            obs_cold: dict[str, npt.NDArray[np.float64]] = result_cold["obs_streams"]
+            obs_hot: dict[str, npt.NDArray[np.float64]] = result_hot["obs_streams"]
+            del result_hot  # free hot obs_streams early
             n_tests = len(obs_cold) * len(obs_cold[next(iter(obs_cold))])
             logger.debug("Phase B: convergence_check — {} (obs × slots) tests", n_tests)
             conv = convergence_check(obs_cold, obs_hot, alpha)
+            del obs_hot
             n_disagree_total = sum(sum(flags) for flags in conv.disagreement_map.values())
             logger.debug(
                 "Phase B: convergence_check done — {}/{} slots disagree",
@@ -327,6 +329,7 @@ class PTEngine2D:
 
             if conv.converged:
                 logger.info("Phase B: converged at n_rounds={}", n_rounds)
+                del replicas_hot, rng_hot, r2s_hot, s2r_hot
 
                 # Measure τ_int from cold-start data (last 80%)
                 burn_in = n_rounds // 5
@@ -334,7 +337,7 @@ class PTEngine2D:
                 for name, slots in obs_cold.items():
                     for s in range(self.M):
                         key = f"{name}_s{s}"
-                        trimmed[key] = np.array(slots[s][burn_in:], dtype=np.float64)
+                        trimmed[key] = slots[s, burn_in:]
 
                 _, self.tau_max = tau_int_multi(trimmed)
                 logger.info("Phase B: tau_max={:.1f}", self.tau_max)
