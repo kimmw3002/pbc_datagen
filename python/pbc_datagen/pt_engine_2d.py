@@ -274,7 +274,7 @@ class PTEngine2D:
     def equilibrate(
         self,
         n_initial: int = 100,
-        n_max: int = 51200,
+        n_max: int = 25600,
         alpha: float = 0.05,
     ) -> None:
         """Phase B: two-initialization convergence check + τ_int measurement.
