@@ -13,12 +13,12 @@ class PTResult(TypedDict):
     n_up: list[int]
     n_down: list[int]
     round_trip_count: int
-    obs_streams: dict[str, list[list[float]]]
+    obs_streams: dict[str, npt.NDArray[np.float64]]  # shape (n_slots, n_rounds)
 
 class PT2DResult(TypedDict):
     # r2s, s2r are mutated in-place on the Python lists passed
     # to pt_rounds_2d — they are NOT in this dict.
-    obs_streams: dict[str, list[list[float]]]
+    obs_streams: dict[str, npt.NDArray[np.float64]]  # shape (n_slots, n_rounds)
     # Per-edge acceptance counters (T-direction and param-direction).
     # T: t_accepts[j*(n_T-1) + i] = edge (i,j)↔(i+1,j)
     # P: p_accepts[i*(n_P-1) + j] = edge (i,j)↔(i,j+1)
