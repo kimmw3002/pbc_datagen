@@ -58,6 +58,25 @@ Hard-won insights from building this codebase. Read this before writing new code
   also treat NaN p-values as passing. Same spirit as the `tau_int` constant-observable
   guard (commit 300237b).
 
+## HDF5 I/O
+
+- **Per-group HDF5 schema is catastrophically slow at scale.** With M=10k temperature slots
+  and 4 datasets per group (snapshots + observables), each production round required 40k
+  h5py calls at ~85μs each = 3.4s/round floor. Fix: flat root-level datasets indexed by
+  slot number — `snapshots (M, N, C, L, L)` + `obs (M, N)`. One h5py write per dataset per
+  round (~4 calls total). Benchmarked at 7500× faster for the write path.
+
+- **Metadata must be persisted every production round, not just at the end.** If metadata
+  (address maps, tau_max, seed_history) is only written once after the production loop,
+  a crash mid-production leaves the HDF5 file with snapshots but stale/missing metadata,
+  making resume impossible. Fix: `write_metadata()` + `flush()` inside the production
+  loop, every round. The cost is negligible compared to the MCMC sweeps.
+
+- **Auto-extend datasets for resume with higher targets.** When resuming with a larger
+  `n_snapshots` target than the original pre-allocation, the dataset runs out of space.
+  Fix: `write_round()` checks `count >= shape[1]` and doubles the dataset via
+  `resize(max(n+1, shape*2), axis=1)`. Amortised O(1) per write.
+
 ## C++ / Build
 
 - **Rebuild after C++ changes:** `uv sync --all-extras --reinstall-package pbc-datagen`.

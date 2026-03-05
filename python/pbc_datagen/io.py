@@ -12,6 +12,24 @@ import numpy.typing as npt
 from loguru import logger
 
 
+def _snapshot_count(f: h5py.File) -> int:
+    """Read actual snapshot count, backward-compatible.
+
+    New flat format stores ``count`` as a root attribute.
+    Old per-group format: fall back to the first group's ``snapshots`` shape[0].
+    """
+    if "count" in f.attrs:
+        return int(f.attrs["count"])
+    # Old-format fallback (per-group)
+    for key in f.keys():
+        obj = f[key]
+        if isinstance(obj, h5py.Group) and "snapshots" in obj:
+            if "count" in obj.attrs:
+                return int(obj.attrs["count"])
+            return int(obj["snapshots"].shape[0])
+    return 0
+
+
 def _t_group_name(T: float) -> str:
     """Canonical HDF5 group name for a temperature slot."""
     return f"T={T:.4f}"
@@ -23,124 +41,134 @@ def _slot_group_name_2d(T: float, param: float, param_label: str) -> str:
 
 
 class SnapshotWriter:
-    """Streaming HDF5 writer for PT snapshot data.
+    """Streaming HDF5 writer for PT snapshot data — flat schema.
 
-    Opens (or creates) an HDF5 file at *path*.  Temperature slots are
-    created once, then snapshots are appended one at a time with an
-    automatic ``flush()`` after each write.
+    All snapshots are stored in root-level datasets:
+    - ``snapshots``: shape ``(M, n_snapshots, C, L, L)``, int8
+    - One ``(M, n_snapshots)`` float64 dataset per observable
+
+    ``M`` is the number of slots (temperature or 2D grid points).
+    ``count`` (root attr) tracks the actual number of written rounds.
+
+    The caller is responsible for calling ``flush()`` at appropriate
+    intervals (e.g. once per production round) to persist buffered
+    writes to disk.
     """
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._file: h5py.File = h5py.File(self._path, "a")
+        self._count: int = 0
+        self._snap_ds: h5py.Dataset | None = None
+        self._obs_ds: dict[str, h5py.Dataset] = {}
         logger.debug("Opened HDF5 file: {}", self._path.name)
 
-    def create_temperature_slot(self, T: float, L: int, C: int, obs_names: list[str]) -> None:
-        """Create a temperature group with resizable datasets.
-
-        Datasets created:
-        - ``snapshots``: shape ``(0, C, L, L)``, int8, resizable along axis 0
-        - One ``(0,)`` float64 dataset per name in *obs_names*
-        """
-        name = _t_group_name(T)
-        logger.debug("Creating T slot: {} (C={}, L={})", name, C, L)
-        grp = self._file.create_group(name)
-        grp.create_dataset(
-            "snapshots",
-            shape=(0, C, L, L),
-            maxshape=(None, C, L, L),
-            dtype=np.int8,
-            chunks=(1, C, L, L),
-        )
-        for name in obs_names:
-            grp.create_dataset(
-                name,
-                shape=(0,),
-                maxshape=(None,),
-                dtype=np.float64,
-                chunks=(1,),
-            )
-
-    def create_slot_2d(
+    def create_datasets(
         self,
-        T: float,
-        param: float,
-        param_label: str,
-        L: int,
+        slot_keys: list[str],
+        n_snapshots: int,
         C: int,
+        L: int,
         obs_names: list[str],
     ) -> None:
-        """Create a 2D PT slot group with resizable datasets."""
-        name = _slot_group_name_2d(T, param, param_label)
-        logger.debug("Creating 2D slot: {} (C={}, L={})", name, C, L)
-        grp = self._file.create_group(name)
-        grp.create_dataset(
+        """Fresh run: pre-allocate flat datasets.
+
+        Creates root-level datasets and stores slot_keys / obs_names
+        as JSON attributes for later discovery.
+        """
+        M = len(slot_keys)
+        self._file.attrs["slot_keys"] = json.dumps(slot_keys)
+        self._file.attrs["obs_names"] = json.dumps(obs_names)
+        self._file.attrs["count"] = 0
+
+        self._snap_ds = self._file.create_dataset(
             "snapshots",
-            shape=(0, C, L, L),
-            maxshape=(None, C, L, L),
+            shape=(M, n_snapshots, C, L, L),
+            maxshape=(M, None, C, L, L),
             dtype=np.int8,
-            chunks=(1, C, L, L),
+            chunks=(1, 1, C, L, L),
         )
-        for obs_name in obs_names:
-            grp.create_dataset(
-                obs_name,
-                shape=(0,),
-                maxshape=(None,),
+        for name in obs_names:
+            self._obs_ds[name] = self._file.create_dataset(
+                name,
+                shape=(M, n_snapshots),
+                maxshape=(M, None),
                 dtype=np.float64,
-                chunks=(1,),
+                chunks=(1, 1),
             )
+        self._count = 0
+        logger.debug(
+            "Created flat datasets: M={}, n_snap={}, C={}, L={}, obs={}",
+            M,
+            n_snapshots,
+            C,
+            L,
+            obs_names,
+        )
 
-    def append_snapshot_2d(
+    def open_datasets(self) -> None:
+        """Resume: cache dataset refs and load count."""
+        self._snap_ds = self._file["snapshots"]
+        obs_names = json.loads(str(self._file.attrs["obs_names"]))
+        for name in obs_names:
+            self._obs_ds[name] = self._file[name]
+        self._count = int(self._file.attrs["count"])
+        logger.debug("Opened existing datasets, count={}", self._count)
+
+    def write_round(
         self,
-        T: float,
-        param: float,
-        param_label: str,
-        spins: npt.NDArray[np.int8],
-        obs_dict: dict[str, float],
+        all_spins: npt.NDArray[np.int8],
+        obs_arrays: dict[str, npt.NDArray[np.float64]],
     ) -> None:
-        """Append one snapshot to a 2D slot, then flush."""
-        key = _slot_group_name_2d(T, param, param_label)
-        grp = self._file[key]
+        """Batch-write one round.
 
-        ds = grp["snapshots"]
-        n = ds.shape[0]
-        ds.resize(n + 1, axis=0)
-        ds[n] = spins
+        Args:
+            all_spins: Shape ``(M, C, L, L)`` — one snapshot per slot.
+            obs_arrays: ``{name: (M,)}`` — one value per slot per observable.
 
-        for name, value in obs_dict.items():
-            obs_ds = grp[name]
-            m = obs_ds.shape[0]
-            obs_ds.resize(m + 1, axis=0)
-            obs_ds[m] = value
+        If the pre-allocated size is exhausted, datasets are extended by
+        doubling (on the snapshot axis) to amortise resize overhead.
+        """
+        assert self._snap_ds is not None
+        n = self._count
+        # Auto-extend if pre-allocated size is exhausted
+        if n >= self._snap_ds.shape[1]:
+            new_size = max(n + 1, self._snap_ds.shape[1] * 2)
+            self._snap_ds.resize(new_size, axis=1)
+            for ds in self._obs_ds.values():
+                ds.resize(new_size, axis=1)
+        self._snap_ds[:, n] = all_spins  # 1 h5py call
+        for name, vals in obs_arrays.items():
+            self._obs_ds[name][:, n] = vals  # 1 call per obs
+        self._count = n + 1
 
-        self._file.flush()
+    @property
+    def snapshot_count(self) -> int:
+        """Return the number of actually written snapshot rounds."""
+        return self._count
 
-    def append_snapshot(
-        self,
-        T: float,
-        spins: npt.NDArray[np.int8],
-        obs_dict: dict[str, float],
-    ) -> None:
-        """Append one snapshot + observable values, then flush."""
-        grp = self._file[_t_group_name(T)]
+    def write_metadata(self, attrs: dict[str, object]) -> None:
+        """Write arbitrary key-value pairs to root-level HDF5 attributes.
 
-        # Grow snapshots dataset by 1 along axis 0
-        ds = grp["snapshots"]
-        n = ds.shape[0]
-        ds.resize(n + 1, axis=0)
-        ds[n] = spins
+        Called alongside ``flush()`` so that every flushed round carries
+        up-to-date campaign metadata (model_type, address maps, seed, etc.).
+        A crash between flushes loses at most one round of snapshots *and*
+        the metadata stays consistent with the last flushed count.
 
-        # Grow each observable dataset
-        for name, value in obs_dict.items():
-            obs_ds = grp[name]
-            m = obs_ds.shape[0]
-            obs_ds.resize(m + 1, axis=0)
-            obs_ds[m] = value
+        Values that are numpy arrays are written directly; lists of ints
+        are converted to int64 arrays; everything else is written as-is.
+        """
+        for key, value in attrs.items():
+            self._file.attrs[key] = value
 
+    def flush(self) -> None:
+        """Persist in-memory count to HDF5 attr, then flush to disk."""
+        self._file.attrs["count"] = self._count
         self._file.flush()
 
     def close(self) -> None:
-        """Close the underlying HDF5 file."""
+        """Persist count and close the underlying HDF5 file."""
+        self._file.attrs["count"] = self._count
         self._file.close()
 
     def __enter__(self) -> SnapshotWriter:
@@ -201,10 +229,20 @@ def read_resume_state(path: str | Path) -> tuple[int, dict[str, Any]]:
 
         # Count snapshots per temperature slot
         snapshot_counts: dict[str, int] = {}
-        for key in f.keys():
-            grp = f[key]
-            if "snapshots" in grp:
-                snapshot_counts[key] = grp["snapshots"].shape[0]
+        if "slot_keys" in f.attrs:
+            # New flat format
+            slot_keys = json.loads(str(f.attrs["slot_keys"]))
+            count = int(f.attrs["count"])
+            snapshot_counts = {k: count for k in slot_keys}
+        else:
+            # Old per-group fallback
+            for key in f.keys():
+                obj = f[key]
+                if isinstance(obj, h5py.Group) and "snapshots" in obj:
+                    if "count" in obj.attrs:
+                        snapshot_counts[key] = int(obj.attrs["count"])
+                    else:
+                        snapshot_counts[key] = int(obj["snapshots"].shape[0])
 
     state: dict[str, Any] = {
         "model_type": model_type,
@@ -282,10 +320,20 @@ def read_resume_state_2d(path: str | Path) -> tuple[int, dict[str, Any]]:
         ]
 
         snapshot_counts: dict[str, int] = {}
-        for key in f.keys():
-            grp = f[key]
-            if "snapshots" in grp:
-                snapshot_counts[key] = grp["snapshots"].shape[0]
+        if "slot_keys" in f.attrs:
+            # New flat format
+            slot_keys = json.loads(str(f.attrs["slot_keys"]))
+            count = int(f.attrs["count"])
+            snapshot_counts = {k: count for k in slot_keys}
+        else:
+            # Old per-group fallback
+            for key in f.keys():
+                obj = f[key]
+                if isinstance(obj, h5py.Group) and "snapshots" in obj:
+                    if "count" in obj.attrs:
+                        snapshot_counts[key] = int(obj.attrs["count"])
+                    else:
+                        snapshot_counts[key] = int(obj["snapshots"].shape[0])
 
     state: dict[str, Any] = {
         "model_type": model_type,

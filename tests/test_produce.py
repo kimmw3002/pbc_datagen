@@ -7,6 +7,7 @@ file layout, data integrity, metadata, and operational warnings.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -87,13 +88,13 @@ class TestProducePrecondition:
 
 
 class TestProduceHDF5Layout:
-    """Verify produce() creates the correct HDF5 file structure."""
+    """Verify produce() creates the correct flat HDF5 file structure."""
 
-    def test_creates_all_temperature_groups(self, tmp_path: Path) -> None:
-        """HDF5 file has one group per temperature in the locked ladder.
+    def test_creates_flat_datasets_with_slot_keys(self, tmp_path: Path) -> None:
+        """HDF5 file has flat root-level datasets and slot_keys attr.
 
-        The group names use the canonical "T={value}" format, and every
-        temperature in the engine's ladder gets its own group.
+        slot_keys is a JSON list mapping index → canonical name.
+        Every temperature in the engine's ladder gets an entry.
         """
         engine = _ready_engine()
         path = tmp_path / "test.h5"
@@ -101,17 +102,17 @@ class TestProduceHDF5Layout:
         engine.produce(path, n_snapshots=3)
 
         with h5py.File(path, "r") as f:
-            groups = list(f.keys())
-            assert len(groups) == engine.n_replicas
-            # Each group name should match a T value in the ladder
+            assert "snapshots" in f
+            slot_keys = json.loads(str(f.attrs["slot_keys"]))
+            assert len(slot_keys) == engine.n_replicas
             for T in engine.temps:
-                assert f"T={T:.4f}" in groups
+                assert f"T={T:.4f}" in slot_keys
 
     def test_correct_snapshot_count(self, tmp_path: Path) -> None:
-        """Each T slot has exactly n_snapshots snapshots in its dataset.
+        """Root count attr equals n_snapshots after produce().
 
         PT production harvests one snapshot from *every* T slot per cycle,
-        so all slots must have identical counts equal to n_snapshots.
+        so count tracks the number of completed rounds.
         """
         engine = _ready_engine()
         path = tmp_path / "test.h5"
@@ -120,49 +121,48 @@ class TestProduceHDF5Layout:
         engine.produce(path, n_snapshots=n_snapshots)
 
         with h5py.File(path, "r") as f:
-            for T in engine.temps:
-                ds = f[f"T={T:.4f}"]["snapshots"]
-                assert ds.shape[0] == n_snapshots
+            assert int(f.attrs["count"]) == n_snapshots
 
     def test_snapshot_dtype_and_shape(self, tmp_path: Path) -> None:
-        """Ising snapshots are int8 with shape (n_snapshots, 1, L, L).
+        """Ising snapshots are int8 with shape (M, n_snapshots, 1, L, L).
 
         Ising and BC models have C=1 (single spin channel).
-        Shape convention: (N, C, L, L) where N = snapshot count.
+        Shape convention: (M, N, C, L, L).
         """
         L = 4
         engine = _ready_engine(L=L)
         path = tmp_path / "test.h5"
         n_snapshots = 3
+        M = engine.n_replicas
 
         engine.produce(path, n_snapshots=n_snapshots)
 
         with h5py.File(path, "r") as f:
-            ds = f[f"T={engine.temps[0]:.4f}"]["snapshots"]
+            ds = f["snapshots"]
             assert ds.dtype == np.int8
-            assert ds.shape == (n_snapshots, 1, L, L)
+            assert ds.shape == (M, n_snapshots, 1, L, L)
 
     def test_observable_datasets_match_model(self, tmp_path: Path) -> None:
         """Observable datasets use the model's observables() keys, all float64.
 
         Ising produces: energy, m, abs_m.  Each should appear as a
-        separate (N,) float64 dataset alongside the snapshots dataset.
+        root-level (M, N) float64 dataset.
         """
         engine = _ready_engine()
         path = tmp_path / "test.h5"
         n_snapshots = 3
+        M = engine.n_replicas
 
         engine.produce(path, n_snapshots=n_snapshots)
 
         expected_obs = list(engine.replicas[0].observables().keys())
 
         with h5py.File(path, "r") as f:
-            grp = f[f"T={engine.temps[0]:.4f}"]
             for name in expected_obs:
-                assert name in grp, f"missing observable dataset '{name}'"
-                ds = grp[name]
+                assert name in f, f"missing observable dataset '{name}'"
+                ds = f[name]
                 assert ds.dtype == np.float64
-                assert ds.shape == (n_snapshots,)
+                assert ds.shape == (M, n_snapshots)
 
 
 # ---------------------------------------------------------------------------
@@ -181,16 +181,14 @@ class TestProduceDataIntegrity:
         """
         engine = _ready_engine()
         path = tmp_path / "test.h5"
+        n_snapshots = 3
 
-        engine.produce(path, n_snapshots=3)
+        engine.produce(path, n_snapshots=n_snapshots)
 
         with h5py.File(path, "r") as f:
-            for T in engine.temps:
-                data = f[f"T={T:.4f}"]["snapshots"][:]
-                # Every element must be exactly +1 or -1
-                assert np.all(np.isin(data, [-1, 1])), (
-                    f"Invalid spin values at T={T}: unique={np.unique(data)}"
-                )
+            count = int(f.attrs["count"])
+            data = f["snapshots"][:, :count]
+            assert np.all(np.isin(data, [-1, 1])), f"Invalid spin values: unique={np.unique(data)}"
 
     def test_observables_are_finite(self, tmp_path: Path) -> None:
         """All observable values must be finite (no NaN or Inf).
@@ -200,17 +198,17 @@ class TestProduceDataIntegrity:
         """
         engine = _ready_engine()
         path = tmp_path / "test.h5"
+        n_snapshots = 3
 
-        engine.produce(path, n_snapshots=3)
+        engine.produce(path, n_snapshots=n_snapshots)
 
         expected_obs = list(engine.replicas[0].observables().keys())
 
         with h5py.File(path, "r") as f:
-            for T in engine.temps:
-                grp = f[f"T={T:.4f}"]
-                for name in expected_obs:
-                    values = grp[name][:]
-                    assert np.all(np.isfinite(values)), f"Non-finite values in {name} at T={T}"
+            count = int(f.attrs["count"])
+            for name in expected_obs:
+                values = f[name][:, :count]
+                assert np.all(np.isfinite(values)), f"Non-finite values in {name}"
 
 
 # ---------------------------------------------------------------------------
@@ -291,10 +289,9 @@ class TestProduceResume:
     """
 
     def test_resume_does_not_crash_on_existing_file(self, tmp_path: Path) -> None:
-        """Calling produce() twice must not raise on group-already-exists.
+        """Calling produce() twice must not raise on dataset-already-exists.
 
-        h5py.create_group() raises ValueError if the group name is taken.
-        produce() must skip group creation when T slots already exist.
+        produce() must detect existing datasets and open them for resume.
         """
         engine = _ready_engine()
         path = tmp_path / "test.h5"
@@ -304,7 +301,7 @@ class TestProduceResume:
         engine.produce(path, n_snapshots=5)
 
     def test_resume_appends_remaining_snapshots(self, tmp_path: Path) -> None:
-        """First call writes 3, second call targets 5 → file has exactly 5.
+        """First call writes 3, second call targets 5 → count is exactly 5.
 
         n_snapshots is the *target total*, not "collect this many more".
         produce() counts existing snapshots on disk and only collects
@@ -317,8 +314,7 @@ class TestProduceResume:
         engine.produce(path, n_snapshots=5)
 
         with h5py.File(path, "r") as f:
-            for T in engine.temps:
-                assert f[f"T={T:.4f}"]["snapshots"].shape[0] == 5
+            assert int(f.attrs["count"]) == 5
 
     def test_resume_already_complete_is_noop(self, tmp_path: Path) -> None:
         """If file already has n_snapshots, produce() adds nothing.
@@ -333,8 +329,7 @@ class TestProduceResume:
         engine.produce(path, n_snapshots=3)
 
         with h5py.File(path, "r") as f:
-            for T in engine.temps:
-                assert f[f"T={T:.4f}"]["snapshots"].shape[0] == 3
+            assert int(f.attrs["count"]) == 3
 
     def test_seed_history_from_caller(self, tmp_path: Path) -> None:
         """produce() uses caller-provided seed_history instead of default.
@@ -344,8 +339,6 @@ class TestProduceResume:
         and passes the extended list to produce().  produce() must store
         it verbatim, not overwrite with [(0, self.seed)].
         """
-        import json
-
         engine = _ready_engine()
         path = tmp_path / "test.h5"
         history: list[tuple[int, int]] = [(0, 42), (3, 99999)]

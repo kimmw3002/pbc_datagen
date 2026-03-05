@@ -176,44 +176,53 @@ Default behaviour is resume. Each param's HDF5 file IS its checkpoint.
 
 File: `python/pbc_datagen/io.py`
 
-#### HDF5 Streaming Writes
+#### HDF5 Flat Schema (Batch Writes)
 
-**HDF5 layout (one file per param value):**
+All snapshots stored in root-level datasets — no per-temperature groups. One file per campaign (param value or 2D grid). ~4 h5py calls per production round instead of 40k with the old per-group schema.
+
+**HDF5 layout:**
 ```
 blume_capel_L64_D=1.5000_1709312456789.h5
-├── .attrs                              # seed, seed_history, model_type, L,
-│                                       # param_value, locked T ladder, τ_max,
-│                                       # address_map, round_trip_stats, "complete"
-├── T=2.269/
-│   ├── snapshots                       # (N, C, L, L) int8, resizable axis 0
-│   ├── energy                          # (N,) float64, resizable
-│   ├── m                               # (N,) float64, resizable
-│   ├── abs_m                           # (N,) float64, resizable
-│   └── .attrs                          # per-slot τ_int
-├── T=2.300/
-│   └── ...
-└── ...
+├── .attrs
+│   ├── model_type, L, param_value      # campaign identity
+│   ├── T_ladder / temps, params        # temperature/param grid (1D / 2D)
+│   ├── tau_max                         # autocorrelation time from Phase B
+│   ├── r2t, t2r / r2s, s2r            # address maps (1D / 2D)
+│   ├── seed, seed_history              # PRNG audit trail
+│   ├── slot_keys                       # JSON list: index → canonical name
+│   ├── obs_names                       # JSON list: observable dataset names
+│   ├── count                           # actual snapshots written (crash cursor)
+│   └── pt_mode                         # "2d" for 2D PT (absent for 1D)
+├── snapshots   (M, N, C, L, L)  int8     chunks=(1,1,C,L,L)
+├── energy      (M, N)           float64   chunks=(1,1)
+├── m           (M, N)           float64   chunks=(1,1)
+└── abs_m       (M, N)           float64   chunks=(1,1)
 ```
 
-**Snapshot shape:** Ising/BC: `C=1` → `(N, 1, L, L)` int8. AT: `C=2` → `(N, 2, L, L)` int8.
+- **M** = number of slots (temperatures for 1D PT, T×param grid points for 2D PT, 1 for single-chain).
+- **N** = pre-allocated snapshot capacity (auto-extends by doubling on resume).
+- **slot_keys** maps dataset index → canonical name (e.g. `["T=1.5000", "T=2.0000"]` or `["T=1.5000_D=0.0000", ...]`).
+- **count** tracks actually written rounds. Persisted on `flush()`/`close()` only — crash loses at most one round.
+- **Metadata written every round** alongside `flush()` so crash-resume always has consistent state.
 
-**Observables:** each snapshot is paired with its observable values, stored as
-separate `(N,)` float64 datasets keyed by observable name. The model's
-`observables()` keys become HDF5 dataset names (e.g. `energy`, `abs_m`, `q`).
-No need to recompute from saved configurations.
+**Snapshot shape:** Ising/BC: `C=1` → `(M, N, 1, L, L)` int8. AT: `C=2` → `(M, N, 2, L, L)` int8.
 
-**Streaming protocol:**
-1. `create_temperature_slot(path, T, L, C, obs_names)` → resizable snapshot dataset + one `(N,)` dataset per observable
-2. `append_snapshot(path, T, spins, obs_dict)` → resize all datasets, write snapshot + each observable value
-3. `file.flush()` after each append
-4. Update attrs after each snapshot batch
-5. Set `"complete": True` when done
+**Observables:** each snapshot round writes one value per slot per observable. Stored as `(M, N)` float64 datasets keyed by observable name. The model's `observables()` keys become HDF5 dataset names.
+
+**SnapshotWriter API:**
+1. `create_datasets(slot_keys, n_snapshots, C, L, obs_names)` — fresh run: pre-allocate flat datasets
+2. `open_datasets()` — resume: cache dataset refs, load count
+3. `write_round(all_spins, obs_arrays)` — batch-write one round: `all_spins (M,C,L,L)`, `obs {name: (M,)}`. Auto-extends if pre-allocated size exhausted.
+4. `write_metadata(attrs)` — write key-value pairs to root attrs (called every round)
+5. `flush()` — persist count + flush to disk
+
+**Read paths** (`read_resume_state`, `read_resume_state_2d`) detect flat schema via `slot_keys` attr, with old per-group fallback for backward compatibility.
 
 #### Steps
 
-- [x] Step 2.3.1: `SnapshotWriter` class — open/create HDF5, create groups, streaming append with flush
-- [x] Step 2.3.2: `write_param_attrs()` — save T ladder, τ_max, address map as HDF5 attrs (updated each snapshot batch)
-- [x] Step 2.3.3: `read_resume_state()` — load last snapshot per T slot + attrs for resume
+- [x] Step 2.3.1: `SnapshotWriter` class — flat schema with `create_datasets`, `write_round`, batch writes
+- [x] Step 2.3.2: `write_param_attrs()` / `write_metadata()` — per-round metadata persistence for crash safety
+- [x] Step 2.3.3: `read_resume_state()` — flat schema with old per-group fallback
 
 ---
 
@@ -397,16 +406,13 @@ benefits too (1D PT sweep loop parallelized).
 - [x] Step 3.8.4: Rename `--workers` to `--threads`, wire to `OMP_NUM_THREADS`
 - [ ] Step 3.8.5: Manual validation: orchestrator dispatches correctly by model type
 
-### 3.9 — HDF5 Output Changes
+### 3.9 — HDF5 Output Changes ✅
 
-One HDF5 file per 2D PT campaign (covers all grid points).
+One HDF5 file per 2D PT campaign (covers all grid points). Uses flat schema — 2D slot keys in `slot_keys` JSON attr (e.g. `"T=1.5000_D=0.0000"`), no per-slot groups.
 
-- Group key includes both T and D: `T={T:.4f}_D={D:.4f}/`
-- Filename encodes T_range, D_range, n_T, n_D
-
-- [x] Step 3.9.1: Update `SnapshotWriter` for 2D group keys
-- [x] Step 3.9.2: Update filename encoding for 2D campaigns
-- [x] Step 3.9.3: Update `read_resume_state()` for 2D layout
+- [x] Step 3.9.1: Flat `SnapshotWriter` with `create_datasets` / `write_round` for 2D slot keys
+- [x] Step 3.9.2: Filename encoding for 2D campaigns
+- [x] Step 3.9.3: `read_resume_state_2d()` with flat schema + old per-group fallback
 - [ ] Step 3.9.4: Tests: HDF5 round-trip with 2D group keys, resume from 2D file
 
 ---
@@ -455,12 +461,14 @@ Validation and diagnostics will be done by hand, not via automated tests.
 
 ### Phase 2 Tests — I/O (`tests/test_io.py`) ✅
 
-12 tests: `TestSnapshotWriterCreation` (2), `TestSnapshotWriterAppend` (4), `TestWriteParamAttrs` (2), `TestReadResumeState` (4).
+16 tests: `TestSnapshotWriterCreation` (2), `TestSnapshotWriterWriteRound` (3), `TestSnapshotWriterResume` (1), `TestWriteParamAttrs` (2), `TestReadResumeState` (4), `TestSnapshotCount` (4).
 
-- [x] Unit: `SnapshotWriter` creates correct HDF5 group hierarchy
-- [x] Unit: `append_snapshot` grows dataset by 1 along axis 0, data matches
-- [x] Unit: `write_param_attrs` round-trips T ladder, τ_max, address map through HDF5 attrs
-- [x] Unit: `read_resume_state` loads last snapshot per T slot and restores attrs
+- [x] Unit: `SnapshotWriter` creates flat datasets with correct shape and attrs
+- [x] Unit: `write_round` batch-writes spins + observables, auto-extends on overflow
+- [x] Unit: Resume via `open_datasets` restores count and appends correctly
+- [x] Unit: `write_param_attrs` round-trips metadata through HDF5 attrs
+- [x] Unit: `read_resume_state` loads flat schema with old per-group fallback
+- [x] Unit: `_snapshot_count` handles flat, old-format, and empty files
 
 ### Phase 2 Tests — Orchestrator (`tests/test_orchestrator.py`) ✅
 

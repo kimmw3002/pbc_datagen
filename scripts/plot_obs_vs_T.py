@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 from pathlib import Path
@@ -41,62 +42,108 @@ def main() -> None:
         model_type = f.attrs["model_type"]
         L = f.attrs["L"]
         is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
+        is_flat = "slot_keys" in f.attrs
 
-        if is_2d:
-            param_label = str(f.attrs["param_label"])
-            # Parse (T, param) from each 2D group
-            slots = sorted(
-                [(*parse_slot_2d(name, param_label), name) for name in f if name.startswith("T=")],
-                key=lambda x: (x[1], x[0]),  # sort by param, then T
-            )
+        if is_flat:
+            slot_keys = json.loads(str(f.attrs["slot_keys"]))
+            count = int(f.attrs["count"])
+            obs_names_all = json.loads(str(f.attrs["obs_names"]))
+            obs_names = args.obs if args.obs else obs_names_all
 
-            # Auto-detect observable names
-            first_group = f[slots[0][2]]
-            all_obs = [k for k in first_group if k != "snapshots"]
-            obs_names = args.obs if args.obs else all_obs
+            if is_2d:
+                param_label = str(f.attrs["param_label"])
+                # Parse (T, param, slot_idx) from slot_keys
+                slots = []
+                for i, key in enumerate(slot_keys):
+                    T_val, pv = parse_slot_2d(key, param_label)
+                    slots.append((T_val, pv, i))
+                slots.sort(key=lambda x: (x[1], x[0]))
 
-            # Group by param value
-            param_vals = sorted(set(s[1] for s in slots))
+                param_vals = sorted(set(s[1] for s in slots))
+                data_2d: dict[str, dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
+                for obs in obs_names:
+                    data_2d[obs] = {}
+                    for pv in param_vals:
+                        pv_slots = [(t, idx) for t, p, idx in slots if p == pv]
+                        ts = np.array([t for t, _ in pv_slots])
+                        means = []
+                        stderrs = []
+                        for _, idx in pv_slots:
+                            vals = f[obs][idx, :count]
+                            means.append(np.mean(vals))
+                            stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+                        data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+            else:
+                param_value = f.attrs.get("param_value", 0.0)
+                # Parse T from slot_keys
+                t_slots = []
+                for i, key in enumerate(slot_keys):
+                    T_val = parse_temperature(key)
+                    t_slots.append((T_val, i))
+                t_slots.sort(key=lambda x: x[0])
 
-            # data_2d[obs][param] = (T_array, mean_array, stderr_array)
-            data_2d: dict[str, dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
-            for obs in obs_names:
-                data_2d[obs] = {}
-                for pv in param_vals:
-                    pv_slots = [(t, gn) for t, p, gn in slots if p == pv]
-                    ts = np.array([t for t, _ in pv_slots])
+                temps = np.array([t for t, _ in t_slots])
+                data_1d: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+                for name in obs_names:
                     means = []
                     stderrs = []
-                    for _, gname in pv_slots:
-                        vals = f[gname][obs][:]
+                    for _, idx in t_slots:
+                        vals = f[name][idx, :count]
                         means.append(np.mean(vals))
                         stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                    data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+                    data_1d[name] = (np.array(means), np.array(stderrs))
         else:
-            param_value = f.attrs["param_value"]
+            # Old per-group schema fallback
+            if is_2d:
+                param_label = str(f.attrs["param_label"])
+                slots_old = sorted(
+                    [
+                        (*parse_slot_2d(name, param_label), name)
+                        for name in f
+                        if name.startswith("T=")
+                    ],
+                    key=lambda x: (x[1], x[0]),
+                )
 
-            # Collect temperature groups sorted by T
-            t_groups = sorted(
-                [(parse_temperature(name), name) for name in f if name.startswith("T=")],
-                key=lambda x: x[0],
-            )
+                first_group = f[slots_old[0][2]]
+                all_obs = [k for k in first_group if k != "snapshots"]
+                obs_names = args.obs if args.obs else all_obs
 
-            # Auto-detect observable names from first group
-            first_group = f[t_groups[0][1]]
-            all_obs = [k for k in first_group if k != "snapshots"]
-            obs_names = args.obs if args.obs else all_obs
+                param_vals = sorted(set(s[1] for s in slots_old))
+                data_2d = {}
+                for obs in obs_names:
+                    data_2d[obs] = {}
+                    for pv in param_vals:
+                        pv_slots = [(t, gn) for t, p, gn in slots_old if p == pv]
+                        ts = np.array([t for t, _ in pv_slots])
+                        means = []
+                        stderrs = []
+                        for _, gname in pv_slots:
+                            vals = f[gname][obs][:]
+                            means.append(np.mean(vals))
+                            stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+                        data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+            else:
+                param_value = f.attrs["param_value"]
+                t_groups = sorted(
+                    [(parse_temperature(name), name) for name in f if name.startswith("T=")],
+                    key=lambda x: x[0],
+                )
 
-            # Collect data: {obs_name: (T_array, mean_array, stderr_array)}
-            temps = np.array([t for t, _ in t_groups])
-            data_1d: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-            for name in obs_names:
-                means = []
-                stderrs = []
-                for _, gname in t_groups:
-                    vals = f[gname][name][:]
-                    means.append(np.mean(vals))
-                    stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                data_1d[name] = (np.array(means), np.array(stderrs))
+                first_group = f[t_groups[0][1]]
+                all_obs = [k for k in first_group if k != "snapshots"]
+                obs_names = args.obs if args.obs else all_obs
+
+                temps = np.array([t for t, _ in t_groups])
+                data_1d = {}
+                for name in obs_names:
+                    means = []
+                    stderrs = []
+                    for _, gname in t_groups:
+                        vals = f[gname][name][:]
+                        means.append(np.mean(vals))
+                        stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+                    data_1d[name] = (np.array(means), np.array(stderrs))
 
     # Plot: subplot grid with ceil(n/2) rows × 2 cols
     n_obs = len(obs_names)
@@ -151,13 +198,14 @@ def main() -> None:
 
     # --- 2D heatmap (separate PNG per observable) ---
     if is_2d:
-        t_vals = sorted(set(s[0] for s in slots))
+        source = slots if is_flat else slots_old  # type: ignore[possibly-undefined]
+        t_vals = sorted(set(s[0] for s in source))
         for obs in obs_names:
             grid = np.zeros((len(param_vals), len(t_vals)))
             for pi, pv in enumerate(param_vals):
-                ts, mean, _ = data_2d[obs][pv]
+                ts_arr, mean, _ = data_2d[obs][pv]
                 for ti, t in enumerate(t_vals):
-                    ix = int(np.argmin(np.abs(ts - t)))
+                    ix = int(np.argmin(np.abs(ts_arr - t)))
                     grid[pi, ti] = mean[ix]
 
             fig_h, ax_h = plt.subplots(figsize=(8, 6))

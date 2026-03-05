@@ -1,7 +1,8 @@
-"""Tests for HDF5 snapshot I/O — SnapshotWriter, attrs, resume."""
+"""Tests for HDF5 snapshot I/O — flat-schema SnapshotWriter, attrs, resume."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import h5py
@@ -18,179 +19,183 @@ def _ising_obs_names() -> list[str]:
     return ["energy", "m", "abs_m"]
 
 
-def _random_spins(L: int, C: int = 1) -> np.ndarray:
-    """Random ±1 spin array shaped (C, L, L), dtype int8."""
+def _random_spins(M: int, C: int, L: int) -> np.ndarray:
+    """Random ±1 spin array shaped (M, C, L, L), dtype int8."""
     rng = np.random.default_rng(42)
-    return rng.choice([-1, 1], size=(C, L, L)).astype(np.int8)
+    return rng.choice([-1, 1], size=(M, C, L, L)).astype(np.int8)
 
 
 # ---------------------------------------------------------------------------
-# SnapshotWriter — group hierarchy & dataset properties
+# SnapshotWriter — flat dataset creation
 # ---------------------------------------------------------------------------
 
 
 class TestSnapshotWriterCreation:
-    """Verify that create_temperature_slot builds the correct HDF5 layout."""
+    """Verify that create_datasets builds the correct flat HDF5 layout."""
 
-    def test_create_slot_group_hierarchy(self, tmp_path: Path) -> None:
-        """Creating a T slot produces a group with 'snapshots' + one dataset per observable."""
+    def test_create_datasets_layout(self, tmp_path: Path) -> None:
+        """create_datasets produces root-level 'snapshots' + obs datasets."""
         from pbc_datagen.io import SnapshotWriter
 
         path = tmp_path / "test.h5"
         obs_names = _ising_obs_names()
+        slot_keys = ["T=2.0000", "T=2.5000"]
 
         with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=2.269, L=4, C=1, obs_names=obs_names)
+            w.create_datasets(slot_keys, n_snapshots=10, C=1, L=4, obs_names=obs_names)
 
         with h5py.File(path, "r") as f:
-            # Exactly one group should exist
-            groups = list(f.keys())
-            assert len(groups) == 1
-
-            grp = f[groups[0]]
-            assert "snapshots" in grp
+            assert "snapshots" in f
             for name in obs_names:
-                assert name in grp, f"missing observable dataset '{name}'"
+                assert name in f, f"missing observable dataset '{name}'"
+            assert json.loads(str(f.attrs["slot_keys"])) == slot_keys
+            assert json.loads(str(f.attrs["obs_names"])) == obs_names
+            assert int(f.attrs["count"]) == 0
 
-    def test_create_slot_datasets_empty_and_resizable(self, tmp_path: Path) -> None:
-        """Datasets start empty (axis-0 = 0) with unlimited maxshape on axis 0."""
+    def test_create_datasets_shapes(self, tmp_path: Path) -> None:
+        """Datasets have correct shapes: (M, n_snap, C, L, L) and (M, n_snap)."""
         from pbc_datagen.io import SnapshotWriter
 
         path = tmp_path / "test.h5"
-        L, C = 4, 1
+        L, C, M, n_snap = 4, 1, 3, 10
         obs_names = _ising_obs_names()
+        slot_keys = [f"T={i:.4f}" for i in range(M)]
 
         with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=2.0, L=L, C=C, obs_names=obs_names)
+            w.create_datasets(slot_keys, n_snap, C, L, obs_names)
 
         with h5py.File(path, "r") as f:
-            grp = f[list(f.keys())[0]]
-
-            snaps = grp["snapshots"]
-            assert snaps.shape == (0, C, L, L)
-            assert snaps.maxshape[0] is None  # resizable
-            assert snaps.dtype == np.int8
-
+            assert f["snapshots"].shape == (M, n_snap, C, L, L)
+            assert f["snapshots"].dtype == np.int8
+            assert f["snapshots"].maxshape[1] is None  # resizable along axis 1
             for name in obs_names:
-                ds = grp[name]
-                assert ds.shape == (0,)
-                assert ds.maxshape[0] is None
-                assert ds.dtype == np.float64
+                assert f[name].shape == (M, n_snap)
+                assert f[name].dtype == np.float64
 
 
 # ---------------------------------------------------------------------------
-# SnapshotWriter — append_snapshot
+# SnapshotWriter — write_round
 # ---------------------------------------------------------------------------
 
 
-class TestSnapshotWriterAppend:
-    """Verify that append_snapshot grows datasets and stores correct data."""
+class TestSnapshotWriterWriteRound:
+    """Verify that write_round stores correct data."""
 
-    def test_append_single_snapshot_data_matches(self, tmp_path: Path) -> None:
-        """Appending one snapshot gives shape (1, C, L, L) with exact data match."""
+    def test_write_single_round(self, tmp_path: Path) -> None:
+        """Writing one round stores spins and obs at [:, 0]."""
         from pbc_datagen.io import SnapshotWriter
 
         path = tmp_path / "test.h5"
-        L, C = 4, 1
+        L, C, M = 4, 1, 2
         obs_names = _ising_obs_names()
-        spins = _random_spins(L, C)
-        obs = {"energy": -12.0, "m": 0.5, "abs_m": 0.5}
+        slot_keys = ["T=2.0000", "T=2.5000"]
+
+        spins = _random_spins(M, C, L)
+        obs = {
+            "energy": np.array([-12.0, -8.0]),
+            "m": np.array([0.5, 0.3]),
+            "abs_m": np.array([0.5, 0.3]),
+        }
 
         with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=2.269, L=L, C=C, obs_names=obs_names)
-            w.append_snapshot(T=2.269, spins=spins, obs_dict=obs)
+            w.create_datasets(slot_keys, n_snapshots=10, C=C, L=L, obs_names=obs_names)
+            w.write_round(spins, obs)
+            assert w.snapshot_count == 1
 
         with h5py.File(path, "r") as f:
-            grp = f[list(f.keys())[0]]
-            snaps = grp["snapshots"]
+            np.testing.assert_array_equal(f["snapshots"][:, 0], spins)
+            assert f["energy"][0, 0] == pytest.approx(-12.0)
+            assert f["energy"][1, 0] == pytest.approx(-8.0)
 
-            assert snaps.shape == (1, C, L, L)
-            np.testing.assert_array_equal(snaps[0], spins)
-
-    def test_append_multiple_grows_axis_zero(self, tmp_path: Path) -> None:
-        """Three sequential appends produce shape (3, C, L, L), each slice correct."""
+    def test_write_multiple_rounds(self, tmp_path: Path) -> None:
+        """Three rounds produce count=3, each at correct index."""
         from pbc_datagen.io import SnapshotWriter
 
         path = tmp_path / "test.h5"
-        L, C = 4, 1
+        L, C, M = 4, 1, 2
         obs_names = _ising_obs_names()
+        slot_keys = ["T=2.0000", "T=2.5000"]
 
         rng = np.random.default_rng(99)
-        snapshots = [rng.choice([-1, 1], size=(C, L, L)).astype(np.int8) for _ in range(3)]
-        obs_vals = [{"energy": float(-8 + 2 * i), "m": 0.1 * i, "abs_m": 0.1 * i} for i in range(3)]
+        all_data = []
+        for _ in range(3):
+            sp = rng.choice([-1, 1], size=(M, C, L, L)).astype(np.int8)
+            ob = {name: rng.random(M) for name in obs_names}
+            all_data.append((sp, ob))
 
         with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=2.0, L=L, C=C, obs_names=obs_names)
-            for sp, ob in zip(snapshots, obs_vals):
-                w.append_snapshot(T=2.0, spins=sp, obs_dict=ob)
+            w.create_datasets(slot_keys, n_snapshots=10, C=C, L=L, obs_names=obs_names)
+            for sp, ob in all_data:
+                w.write_round(sp, ob)
+            assert w.snapshot_count == 3
 
         with h5py.File(path, "r") as f:
-            grp = f[list(f.keys())[0]]
-            snaps = grp["snapshots"]
+            assert int(f.attrs["count"]) == 3
+            for i, (sp, ob) in enumerate(all_data):
+                np.testing.assert_array_equal(f["snapshots"][:, i], sp)
 
-            assert snaps.shape == (3, C, L, L)
-            for i, expected in enumerate(snapshots):
-                np.testing.assert_array_equal(snaps[i], expected)
-
-    def test_append_stores_observable_values(self, tmp_path: Path) -> None:
-        """Observable datasets grow in sync with snapshots, values are exact."""
+    def test_two_channel_ashkin_teller(self, tmp_path: Path) -> None:
+        """C=2 (Ashkin-Teller) snapshots have shape (M, n_snap, 2, L, L)."""
         from pbc_datagen.io import SnapshotWriter
 
         path = tmp_path / "test.h5"
-        L, C = 4, 1
+        L, C, M = 4, 2, 2
+        obs_names = ["energy", "m_sigma", "abs_m_sigma"]
+        slot_keys = ["T=2.0000", "T=2.5000"]
+
+        spins = _random_spins(M, C, L)
+
+        with SnapshotWriter(path) as w:
+            w.create_datasets(slot_keys, n_snapshots=5, C=C, L=L, obs_names=obs_names)
+            obs = {name: np.zeros(M) for name in obs_names}
+            w.write_round(spins, obs)
+
+        with h5py.File(path, "r") as f:
+            assert f["snapshots"].shape == (M, 5, 2, L, L)
+            np.testing.assert_array_equal(f["snapshots"][:, 0], spins)
+
+
+# ---------------------------------------------------------------------------
+# SnapshotWriter — resume (open_datasets)
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotWriterResume:
+    """Verify open_datasets loads state correctly for resume."""
+
+    def test_open_datasets_resumes_count(self, tmp_path: Path) -> None:
+        """After close + reopen, open_datasets restores the correct count."""
+        from pbc_datagen.io import SnapshotWriter
+
+        path = tmp_path / "test.h5"
+        L, C, M = 4, 1, 2
         obs_names = _ising_obs_names()
+        slot_keys = ["T=2.0000", "T=2.5000"]
 
-        obs_a = {"energy": -16.0, "m": 1.0, "abs_m": 1.0}
-        obs_b = {"energy": -8.0, "m": 0.0, "abs_m": 0.5}
-
+        # Write 3 rounds, close
         with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=2.0, L=L, C=C, obs_names=obs_names)
-            w.append_snapshot(T=2.0, spins=_random_spins(L, C), obs_dict=obs_a)
-            w.append_snapshot(T=2.0, spins=_random_spins(L, C), obs_dict=obs_b)
+            w.create_datasets(slot_keys, n_snapshots=10, C=C, L=L, obs_names=obs_names)
+            for _ in range(3):
+                w.write_round(
+                    _random_spins(M, C, L),
+                    {name: np.zeros(M) for name in obs_names},
+                )
+
+        # Reopen and resume
+        with SnapshotWriter(path) as w:
+            w.open_datasets()
+            assert w.snapshot_count == 3
+
+            # Write 2 more rounds
+            for _ in range(2):
+                w.write_round(
+                    _random_spins(M, C, L),
+                    {name: np.zeros(M) for name in obs_names},
+                )
+            assert w.snapshot_count == 5
 
         with h5py.File(path, "r") as f:
-            grp = f[list(f.keys())[0]]
-
-            assert grp["energy"].shape == (2,)
-            assert grp["energy"][0] == pytest.approx(-16.0)
-            assert grp["energy"][1] == pytest.approx(-8.0)
-
-            assert grp["m"][0] == pytest.approx(1.0)
-            assert grp["m"][1] == pytest.approx(0.0)
-
-    def test_two_channel_snapshot_ashkin_teller(self, tmp_path: Path) -> None:
-        """C=2 (Ashkin-Teller) snapshots have shape (N, 2, L, L)."""
-        from pbc_datagen.io import SnapshotWriter
-
-        path = tmp_path / "test.h5"
-        L, C = 4, 2
-        obs_names = [
-            "energy",
-            "m_sigma",
-            "abs_m_sigma",
-            "m_tau",
-            "abs_m_tau",
-            "m_baxter",
-            "abs_m_baxter",
-        ]
-        spins = _random_spins(L, C)  # shape (2, 4, 4)
-        obs = {name: float(i) for i, name in enumerate(obs_names)}
-
-        with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=3.0, L=L, C=C, obs_names=obs_names)
-            w.append_snapshot(T=3.0, spins=spins, obs_dict=obs)
-
-        with h5py.File(path, "r") as f:
-            grp = f[list(f.keys())[0]]
-            snaps = grp["snapshots"]
-
-            assert snaps.shape == (1, 2, L, L)
-            np.testing.assert_array_equal(snaps[0], spins)
-
-            # All 7 observable datasets should exist
-            for name in obs_names:
-                assert name in grp
-                assert grp[name].shape == (1,)
+            assert int(f.attrs["count"]) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +207,7 @@ class TestWriteParamAttrs:
     """Verify campaign metadata survives an HDF5 attrs round-trip."""
 
     def test_roundtrip_all_fields(self, tmp_path: Path) -> None:
-        """Every field written by write_param_attrs is recoverable from HDF5 attrs."""
+        """Every field written by write_param_attrs is recoverable."""
         from pbc_datagen.io import SnapshotWriter, write_param_attrs
 
         path = tmp_path / "test.h5"
@@ -214,7 +219,7 @@ class TestWriteParamAttrs:
 
         # Create a minimal valid HDF5 file first
         with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=2.0, L=4, C=1, obs_names=_ising_obs_names())
+            w.create_datasets(["T=2.0000"], n_snapshots=1, C=1, L=4, obs_names=_ising_obs_names())
 
         write_param_attrs(
             path,
@@ -240,21 +245,15 @@ class TestWriteParamAttrs:
             np.testing.assert_array_equal(f.attrs["t2r"], t2r)
 
     def test_repeated_calls_overwrite_address_maps(self, tmp_path: Path) -> None:
-        """Calling write_param_attrs again overwrites r2t/t2r with latest values.
-
-        During Phase C, replicas exchange temperatures every round.  The
-        address maps (r2t, t2r) must be updated on disk so that a crash-
-        resume restores the correct replica↔temperature assignment.
-        """
+        """Calling write_param_attrs again overwrites r2t/t2r."""
         from pbc_datagen.io import SnapshotWriter, write_param_attrs
 
         path = tmp_path / "test.h5"
         T_ladder = np.array([1.0, 2.0, 3.0])
 
         with SnapshotWriter(path) as w:
-            w.create_temperature_slot(T=2.0, L=4, C=1, obs_names=_ising_obs_names())
+            w.create_datasets(["T=2.0000"], n_snapshots=1, C=1, L=4, obs_names=_ising_obs_names())
 
-        # First write: identity map
         write_param_attrs(
             path,
             model_type="ising",
@@ -267,8 +266,6 @@ class TestWriteParamAttrs:
             seed=100,
             seed_history=[(0, 100)],
         )
-
-        # Second write: replicas 0 and 2 swapped
         write_param_attrs(
             path,
             model_type="ising",
@@ -304,27 +301,22 @@ class TestReadResumeState:
         t2r: list[int] | None = None,
         seed_history: list[tuple[int, int]] | None = None,
     ) -> int:
-        """Helper: create an HDF5 with uniform snapshot counts. Returns seed.
-
-        PT production harvests one snapshot from *every* T slot per cycle,
-        so all slots always have the same count.
-        """
+        """Helper: create an HDF5 with uniform snapshot counts. Returns seed."""
         from pbc_datagen.io import SnapshotWriter, write_param_attrs
 
         seed = 42
         T_ladder = np.array([1.5, 2.0, 2.5])
         obs_names = _ising_obs_names()
-        L, C = 4, 1
+        L, C, M = 4, 1, 3
+        slot_keys = [f"T={T:.4f}" for T in T_ladder]
 
         with SnapshotWriter(path) as w:
-            for T in T_ladder:
-                w.create_temperature_slot(T=T, L=L, C=C, obs_names=obs_names)
-
-            # Uniform: n_snapshots per every T slot
-            dummy_obs = {"energy": -8.0, "m": 0.5, "abs_m": 0.5}
+            w.create_datasets(slot_keys, n_snapshots, C, L, obs_names)
             for _ in range(n_snapshots):
-                for T in T_ladder:
-                    w.append_snapshot(T=T, spins=_random_spins(L, C), obs_dict=dummy_obs)
+                w.write_round(
+                    _random_spins(M, C, L),
+                    {name: np.zeros(M) for name in obs_names},
+                )
 
         write_param_attrs(
             path,
@@ -341,11 +333,7 @@ class TestReadResumeState:
         return seed
 
     def test_returns_seed_and_uniform_snapshot_count(self, tmp_path: Path) -> None:
-        """Resume state has correct seed and equal counts across all T slots.
-
-        PT production harvests all T slots in lockstep, so every slot
-        must have the same snapshot count.
-        """
+        """Resume state has correct seed and equal counts across all slots."""
         from pbc_datagen.io import read_resume_state
 
         path = tmp_path / "test.h5"
@@ -355,7 +343,7 @@ class TestReadResumeState:
 
         assert seed == expected_seed
         counts = state["snapshot_counts"]
-        assert len(counts) == 3  # one entry per T slot
+        assert len(counts) == 3
         assert all(c == 7 for c in counts.values())
 
     def test_preserves_ladder_and_metadata(self, tmp_path: Path) -> None:
@@ -373,12 +361,7 @@ class TestReadResumeState:
         assert state["L"] == 4
 
     def test_resume_returns_latest_address_maps(self, tmp_path: Path) -> None:
-        """read_resume_state returns the most recently saved r2t/t2r.
-
-        During production, replicas swap temperatures each round.  If we
-        crash and resume, we must restore the exact replica↔temperature
-        assignment from the last write_param_attrs call.
-        """
+        """read_resume_state returns the most recently saved r2t/t2r."""
         from pbc_datagen.io import read_resume_state
 
         path = tmp_path / "test.h5"
@@ -390,11 +373,7 @@ class TestReadResumeState:
         np.testing.assert_array_equal(state["t2r"], [2, 1, 0])
 
     def test_resume_returns_seed_history(self, tmp_path: Path) -> None:
-        """seed_history must survive the round-trip so the orchestrator can extend it.
-
-        On resume the orchestrator appends (n_existing, new_seed) to the
-        history.  If seed_history is lost, the replay audit trail breaks.
-        """
+        """seed_history must survive the round-trip."""
         from pbc_datagen.io import read_resume_state
 
         path = tmp_path / "test.h5"
@@ -407,3 +386,50 @@ class TestReadResumeState:
         assert len(recovered) == 2
         assert recovered[0] == (0, 42)
         assert recovered[1] == (50, 99999)
+
+
+# ---------------------------------------------------------------------------
+# _snapshot_count — flat + old-format fallback
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotCount:
+    """Verify _snapshot_count works for both flat and old formats."""
+
+    def test_flat_format_uses_root_count(self, tmp_path: Path) -> None:
+        """Flat format: _snapshot_count reads root-level count attr."""
+        from pbc_datagen.io import _snapshot_count
+
+        path = tmp_path / "test.h5"
+        with h5py.File(path, "w") as f:
+            f.attrs["count"] = 7
+            assert _snapshot_count(f) == 7
+
+    def test_old_format_group_with_count(self, tmp_path: Path) -> None:
+        """Old format with count attr on group."""
+        from pbc_datagen.io import _snapshot_count
+
+        path = tmp_path / "test.h5"
+        with h5py.File(path, "w") as f:
+            grp = f.create_group("T=2.0000")
+            grp.create_dataset("snapshots", shape=(10, 1, 4, 4), dtype=np.int8)
+            grp.attrs["count"] = 3
+            assert _snapshot_count(f) == 3
+
+    def test_old_format_group_no_count(self, tmp_path: Path) -> None:
+        """Old format without count attr falls back to shape[0]."""
+        from pbc_datagen.io import _snapshot_count
+
+        path = tmp_path / "test.h5"
+        with h5py.File(path, "w") as f:
+            grp = f.create_group("T=2.0000")
+            grp.create_dataset("snapshots", shape=(5, 1, 4, 4), dtype=np.int8)
+            assert _snapshot_count(f) == 5
+
+    def test_empty_file(self, tmp_path: Path) -> None:
+        """Empty file returns 0."""
+        from pbc_datagen.io import _snapshot_count
+
+        path = tmp_path / "test.h5"
+        with h5py.File(path, "w") as f:
+            assert _snapshot_count(f) == 0

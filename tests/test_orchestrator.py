@@ -181,11 +181,10 @@ class TestRunCampaign:
 
         assert result_path.exists()
         with h5py.File(result_path, "r") as f:
-            # Should have groups and each has 3 snapshots
-            groups = [k for k in f.keys() if k.startswith("T=")]
-            assert len(groups) == 3  # n_replicas
-            for g in groups:
-                assert f[g]["snapshots"].shape[0] == 3
+            # Flat schema: count=3, snapshots shape (M, 3, C, L, L)
+            assert int(f.attrs["count"]) == 3
+            assert f["snapshots"].shape[0] == 3  # M = n_replicas
+            assert f["snapshots"].shape[1] == 3  # n_snapshots
 
     def test_output_filename_matches_convention(self, tmp_path: Path) -> None:
         """Ising output file encodes T-range and replica count.
@@ -306,9 +305,7 @@ class TestRunCampaignResume:
         )
 
         with h5py.File(path, "r") as f:
-            for g in f.keys():
-                if g.startswith("T="):
-                    assert f[g]["snapshots"].shape[0] == 5
+            assert int(f.attrs["count"]) == 5
 
     def test_resume_extends_seed_history(self, tmp_path: Path) -> None:
         """After resume, seed_history has two entries: the original

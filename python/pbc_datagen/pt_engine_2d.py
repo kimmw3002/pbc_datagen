@@ -11,6 +11,7 @@ the transition endpoint through the second-order region.
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from typing import Callable, Union
@@ -22,7 +23,7 @@ from loguru import logger
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int_multi
 from pbc_datagen.convergence import convergence_check
-from pbc_datagen.io import SnapshotWriter, _slot_group_name_2d, write_param_attrs_2d
+from pbc_datagen.io import SnapshotWriter, _slot_group_name_2d
 from pbc_datagen.spectral import check_connectivity
 
 Model = Union[_core.BlumeCapelModel, _core.AshkinTellerModel]
@@ -415,23 +416,33 @@ class PTEngine2D:
         last_q: list[float | None] = [None] * self.M
         phase_crossings = 0
 
-        with SnapshotWriter(path) as writer:
-            # Create slots if they don't exist
-            first_key = _slot_group_name_2d(self.temps[0], self.params[0], pl)
-            if first_key not in writer._file:
-                for i_t in range(self.n_T):
-                    for j_p in range(self.n_P):
-                        writer.create_slot_2d(
-                            T=self.temps[i_t],
-                            param=self.params[j_p],
-                            param_label=pl,
-                            L=L,
-                            C=C,
-                            obs_names=obs_names,
-                        )
+        slot_keys = [
+            _slot_group_name_2d(self.temps[s // self.n_P], self.params[s % self.n_P], pl)
+            for s in range(self.M)
+        ]
 
-            # Count existing snapshots (use first slot)
-            n_existing = writer._file[first_key]["snapshots"].shape[0]
+        # Metadata dict — written alongside every flush so crash-resume works
+        metadata: dict[str, object] = {
+            "model_type": self.model_type,
+            "L": L,
+            "param_label": pl,
+            "temps": np.asarray(self.temps, dtype=np.float64),
+            "params": np.asarray(self.params, dtype=np.float64),
+            "tau_max": self.tau_max,
+            "seed": self.seed,
+            "seed_history": json.dumps(seed_history),
+            "pt_mode": "2d",
+        }
+
+        with SnapshotWriter(path) as writer:
+            # Create flat datasets or open existing ones for resume
+            if "snapshots" not in writer._file:
+                writer.create_datasets(slot_keys, n_snapshots, C, L, obs_names)
+            else:
+                writer.open_datasets()
+
+            # Count existing snapshots (all slots in lockstep)
+            n_existing = writer.snapshot_count
             n_remaining = n_snapshots - n_existing
             if n_remaining <= 0:
                 logger.info("Phase C: already have {}/{}, done", n_existing, n_snapshots)
@@ -444,25 +455,24 @@ class PTEngine2D:
                 # Thinning rounds
                 self._run_pt(self.replicas, self.r2s, self.s2r, thinning, self.rng, False)
 
-                # Harvest one snapshot from every slot
+                # Batch-collect one snapshot from every slot
+                all_spins = np.empty((self.M, C, L, L), dtype=np.int8)
+                all_obs: dict[str, npt.NDArray[np.float64]] = {
+                    name: np.empty(self.M, dtype=np.float64) for name in obs_names
+                }
                 for s in range(self.M):
-                    i_t = s // self.n_P
-                    j_p = s % self.n_P
                     replica = self.replicas[self.s2r[s]]
-                    T = self.temps[i_t]
-                    param = self.params[j_p]
 
                     if self.model_type == "ashkin_teller":
-                        spins = np.stack(
+                        all_spins[s] = np.stack(
                             [replica.sigma, replica.tau]  # type: ignore[union-attr]
                         ).astype(np.int8)
                     else:
-                        spins = replica.spins[np.newaxis].copy()  # type: ignore[union-attr]
+                        all_spins[s] = replica.spins[np.newaxis].copy()  # type: ignore[union-attr]
 
                     obs = replica.observables()
-                    writer.append_snapshot_2d(
-                        T=T, param=param, param_label=pl, spins=spins, obs_dict=obs
-                    )
+                    for name in obs_names:
+                        all_obs[name][s] = obs[name]
 
                     # Phase crossing tracking (BC: Q crosses 0.5)
                     if track_crossings:
@@ -472,6 +482,14 @@ class PTEngine2D:
                             if (last_q[r] > 0.5) != (q > 0.5):  # type: ignore[operator]
                                 phase_crossings += 1
                         last_q[r] = q
+
+                writer.write_round(all_spins, all_obs)
+
+                # Persist metadata + address maps alongside every flush
+                metadata["r2s"] = np.asarray(self.r2s, dtype=np.int64)
+                metadata["s2r"] = np.asarray(self.s2r, dtype=np.int64)
+                writer.write_metadata(metadata)
+                writer.flush()
 
                 done = n_existing + snap_i + 1
                 if done % 10 == 0 or snap_i == n_remaining - 1:
@@ -486,18 +504,3 @@ class PTEngine2D:
                 )
             else:
                 logger.info("Phase C: {} phase crossings", phase_crossings)
-
-        # Write metadata
-        write_param_attrs_2d(
-            path,
-            model_type=self.model_type,
-            L=L,
-            param_label=pl,
-            temps=self.temps,
-            params=self.params,
-            tau_max=self.tau_max,
-            r2s=self.r2s,
-            s2r=self.s2r,
-            seed=self.seed,
-            seed_history=seed_history,
-        )

@@ -12,6 +12,7 @@ Reuses existing infrastructure:
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from pathlib import Path
@@ -23,7 +24,7 @@ from loguru import logger
 
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int_multi
-from pbc_datagen.io import SnapshotWriter, _t_group_name, read_resume_state, write_param_attrs
+from pbc_datagen.io import SnapshotWriter, _t_group_name, read_resume_state
 from pbc_datagen.orchestrator import _derive_seed, _param_label
 from pbc_datagen.parallel_tempering import welch_equilibration_check
 
@@ -179,15 +180,30 @@ class SingleChainEngine:
             thinning,
         )
 
-        t_group = _t_group_name(self.T)
+        slot_keys = [_t_group_name(self.T)]
+
+        # Metadata dict — written alongside every flush so crash-resume works
+        metadata: dict[str, object] = {
+            "model_type": self.model_type,
+            "L": L,
+            "param_value": self.param_value,
+            "T_ladder": np.array([self.T], dtype=np.float64),
+            "tau_max": self.tau_max,
+            "r2t": np.array([0], dtype=np.int64),
+            "t2r": np.array([0], dtype=np.int64),
+            "seed": self.seed,
+            "seed_history": json.dumps(seed_history),
+        }
 
         with SnapshotWriter(path) as writer:
-            # Create T slot if it doesn't exist
-            if t_group not in writer._file:
-                writer.create_temperature_slot(T=self.T, L=L, C=C, obs_names=obs_names)
+            # Create flat datasets or open existing ones for resume
+            if "snapshots" not in writer._file:
+                writer.create_datasets(slot_keys, n_snapshots, C, L, obs_names)
+            else:
+                writer.open_datasets()
 
             # Count existing snapshots
-            n_existing = writer._file[t_group]["snapshots"].shape[0]
+            n_existing = writer.snapshot_count
             n_remaining = n_snapshots - n_existing
             if n_remaining <= 0:
                 logger.info(
@@ -205,7 +221,7 @@ class SingleChainEngine:
                 # Decorrelation sweeps (discard the observable time series)
                 self.model.sweep(thinning)
 
-                # Harvest snapshot
+                # Harvest snapshot — M=1 batch
                 if self.model_type == "ashkin_teller":
                     spins = np.stack(
                         [self.model.sigma, self.model.tau]  # type: ignore[union-attr]
@@ -213,26 +229,17 @@ class SingleChainEngine:
                 else:
                     spins = self.model.spins[np.newaxis].copy()  # type: ignore[union-attr]
 
+                all_spins = spins[np.newaxis]  # (1, C, L, L)
                 obs = self.model.observables()
-                writer.append_snapshot(T=self.T, spins=spins, obs_dict=obs)
+                all_obs = {name: np.array([obs[name]]) for name in obs_names}
+
+                writer.write_round(all_spins, all_obs)
+                writer.write_metadata(metadata)
+                writer.flush()
 
                 done = n_existing + snap_i + 1
                 if done % 10 == 0 or snap_i == n_remaining - 1:
                     logger.info("{}/{} snapshots collected", done, n_snapshots)
-
-        # Write metadata
-        write_param_attrs(
-            path,
-            model_type=self.model_type,
-            L=L,
-            param_value=self.param_value,
-            T_ladder=np.array([self.T]),
-            tau_max=self.tau_max,
-            r2t=[0],
-            t2r=[0],
-            seed=self.seed,
-            seed_history=seed_history,
-        )
 
 
 # ---------------------------------------------------------------------------

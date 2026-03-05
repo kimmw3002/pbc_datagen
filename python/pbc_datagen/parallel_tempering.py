@@ -10,6 +10,7 @@ The hot inner loop (sweep + exchange + histograms) lives in C++
 
 from __future__ import annotations
 
+import json
 import math
 import warnings
 from pathlib import Path
@@ -22,7 +23,7 @@ from scipy import stats
 
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int, tau_int_multi
-from pbc_datagen.io import SnapshotWriter, _t_group_name, write_param_attrs
+from pbc_datagen.io import SnapshotWriter, _t_group_name
 
 # Union of all model types — mypy needs this to see set_temperature etc.
 Model = Union[_core.IsingModel, _core.BlumeCapelModel, _core.AshkinTellerModel]
@@ -649,15 +650,28 @@ class PTEngine:
             thinning,
         )
 
-        with SnapshotWriter(path) as writer:
-            # Create T slots only if they don't already exist
-            first_key = _t_group_name(self.temps[0])
-            if first_key not in writer._file:
-                for T in self.temps:
-                    writer.create_temperature_slot(T=T, L=L, C=C, obs_names=obs_names)
+        slot_keys = [_t_group_name(T) for T in self.temps]
 
-            # Count existing snapshots (all T slots are in lockstep)
-            n_existing = writer._file[first_key]["snapshots"].shape[0]
+        # Metadata dict — written alongside every flush so crash-resume works
+        metadata: dict[str, object] = {
+            "model_type": self.model_type,
+            "L": L,
+            "param_value": self.param_value,
+            "T_ladder": np.asarray(self.temps, dtype=np.float64),
+            "tau_max": self.tau_max,
+            "seed": self.seed,
+            "seed_history": json.dumps(seed_history),
+        }
+
+        with SnapshotWriter(path) as writer:
+            # Create flat datasets or open existing ones for resume
+            if "snapshots" not in writer._file:
+                writer.create_datasets(slot_keys, n_snapshots, C, L, obs_names)
+            else:
+                writer.open_datasets()
+
+            # Count existing snapshots (all slots in lockstep)
+            n_existing = writer.snapshot_count
             n_remaining = n_snapshots - n_existing
             if n_remaining <= 0:
                 logger.info(
@@ -690,21 +704,33 @@ class PTEngine:
                 )
                 total_round_trips += result["round_trip_count"]
 
-                # Harvest one snapshot from every T slot
+                # Batch-collect one snapshot from every T slot
+                all_spins = np.empty((M, C, L, L), dtype=np.int8)
+                all_obs: dict[str, npt.NDArray[np.float64]] = {
+                    name: np.empty(M, dtype=np.float64) for name in obs_names
+                }
                 for t in range(M):
                     replica = self.replicas[self.t2r[t]]
-                    T = self.temps[t]
 
-                    # Build (C, L, L) spin array
                     if self.model_type == "ashkin_teller":
-                        spins = np.stack(
+                        all_spins[t] = np.stack(
                             [replica.sigma, replica.tau]  # type: ignore[union-attr]
                         ).astype(np.int8)
                     else:
-                        spins = replica.spins[np.newaxis].copy()  # type: ignore[union-attr]
+                        all_spins[t] = replica.spins[np.newaxis].copy()  # type: ignore[union-attr]
 
                     obs = replica.observables()
-                    writer.append_snapshot(T=T, spins=spins, obs_dict=obs)
+                    for name in obs_names:
+                        all_obs[name][t] = obs[name]
+
+                writer.write_round(all_spins, all_obs)
+
+                # Persist metadata + address maps alongside every flush
+                # so crash-resume always has consistent state
+                metadata["r2t"] = np.asarray(self.r2t, dtype=np.int64)
+                metadata["t2r"] = np.asarray(self.t2r, dtype=np.int64)
+                writer.write_metadata(metadata)
+                writer.flush()
 
                 done = n_existing + snap_i + 1
                 if done % 10 == 0 or snap_i == n_remaining - 1:
@@ -717,17 +743,3 @@ class PTEngine:
                 )
             else:
                 logger.info("Phase C: {} round trips completed", total_round_trips)
-
-        # Write campaign metadata
-        write_param_attrs(
-            path,
-            model_type=self.model_type,
-            L=L,
-            param_value=self.param_value,
-            T_ladder=self.temps,
-            tau_max=self.tau_max,
-            r2t=self.r2t,
-            t2r=self.t2r,
-            seed=self.seed,
-            seed_history=seed_history,
-        )

@@ -88,7 +88,7 @@ class TestProduce:
     """Verify produce() writes correct HDF5 structure."""
 
     def test_hdf5_structure_after_produce(self, tmp_path: Path) -> None:
-        """After equilibrate + produce(n=5), HDF5 has one T group with
+        """After equilibrate + produce(n=5), HDF5 has flat datasets with
         correct snapshot shape, observable datasets, and root attrs.
         """
         from pbc_datagen.single_chain import SingleChainEngine
@@ -104,22 +104,18 @@ class TestProduce:
             assert int(f.attrs["L"]) == 4
             assert float(f.attrs["tau_max"]) > 0
             assert int(f.attrs["seed"]) == 42
+            assert int(f.attrs["count"]) == 5
 
-            # One T group
-            groups = [k for k in f.keys() if k.startswith("T=")]
-            assert len(groups) == 1
-            grp = f[groups[0]]
+            # Flat snapshot dataset: (1, 5, 1, 4, 4) int8
+            assert f["snapshots"].shape == (1, 5, 1, 4, 4)
+            assert f["snapshots"].dtype == np.int8
 
-            # Snapshot shape: (5, 1, 4, 4) int8
-            assert grp["snapshots"].shape == (5, 1, 4, 4)
-            assert grp["snapshots"].dtype == np.int8
-
-            # Observable datasets: shape (5,) each
+            # Observable datasets: shape (1, 5) each
             for obs_name in ("energy", "m", "abs_m"):
-                assert grp[obs_name].shape == (5,)
+                assert f[obs_name].shape == (1, 5)
 
     def test_blume_capel_produce(self, tmp_path: Path) -> None:
-        """Blume-Capel produce creates correct structure with 4 observables."""
+        """Blume-Capel produce creates correct flat structure with 4 observables."""
         from pbc_datagen.single_chain import SingleChainEngine
 
         path = tmp_path / "bc_test.h5"
@@ -130,13 +126,11 @@ class TestProduce:
         engine.produce(path=path, n_snapshots=3)
 
         with h5py.File(path, "r") as f:
-            groups = [k for k in f.keys() if k.startswith("T=")]
-            assert len(groups) == 1
-            grp = f[groups[0]]
-            assert grp["snapshots"].shape == (3, 1, 4, 4)
+            assert int(f.attrs["count"]) == 3
+            assert f["snapshots"].shape == (1, 3, 1, 4, 4)
             # BC has 4 observables: energy, m, abs_m, q
             for obs_name in ("energy", "m", "abs_m", "q"):
-                assert grp[obs_name].shape == (3,)
+                assert f[obs_name].shape == (1, 3)
 
     def test_ashkin_teller_two_channels(self, tmp_path: Path) -> None:
         """Ashkin-Teller produce creates snapshots with C=2 channels."""
@@ -148,10 +142,8 @@ class TestProduce:
         engine.produce(path=path, n_snapshots=3)
 
         with h5py.File(path, "r") as f:
-            groups = [k for k in f.keys() if k.startswith("T=")]
-            grp = f[groups[0]]
-            # AT has C=2: (sigma, tau)
-            assert grp["snapshots"].shape == (3, 2, 4, 4)
+            # AT has C=2: (sigma, tau) → shape (1, 3, 2, 4, 4)
+            assert f["snapshots"].shape == (1, 3, 2, 4, 4)
 
     def test_t_ladder_is_single_element(self, tmp_path: Path) -> None:
         """T_ladder attr is a 1-element array containing the target T."""
@@ -258,9 +250,8 @@ class TestRunSingleCampaign:
 
         assert path.exists()
         with h5py.File(path, "r") as f:
-            groups = [k for k in f.keys() if k.startswith("T=")]
-            assert len(groups) == 1
-            assert f[groups[0]]["snapshots"].shape[0] == 3
+            assert int(f.attrs["count"]) == 3
+            assert f["snapshots"].shape[0] == 1  # M=1 for single chain
 
     def test_filename_convention_ising(self, tmp_path: Path) -> None:
         """Ising filename: ising_L4_T=2.2690_{ts}.h5 — no param label."""
@@ -344,9 +335,7 @@ class TestRunSingleCampaign:
         )
 
         with h5py.File(path, "r") as f:
-            for g in f.keys():
-                if g.startswith("T="):
-                    assert f[g]["snapshots"].shape[0] == 5
+            assert int(f.attrs["count"]) == 5
 
     def test_resume_extends_seed_history(self, tmp_path: Path) -> None:
         """After resume, seed_history has two entries."""
