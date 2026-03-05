@@ -30,6 +30,9 @@ def _snapshot_count(f: h5py.File) -> int:
     return 0
 
 
+_ATTR_ELEM_LIMIT = 512  # arrays larger than this become root-level datasets
+
+
 def _t_group_name(T: float) -> str:
     """Canonical HDF5 group name for a temperature slot."""
     return f"T={T:.4f}"
@@ -157,9 +160,21 @@ class SnapshotWriter:
 
         Values that are numpy arrays are written directly; lists of ints
         are converted to int64 arrays; everything else is written as-is.
+
+        Arrays with more than ``_ATTR_ELEM_LIMIT`` elements are stored as
+        root-level datasets instead of attributes to avoid the HDF5 ~64 KB
+        per-attribute object-header limit.
         """
         for key, value in attrs.items():
-            self._file.attrs[key] = value
+            arr = np.asarray(value) if isinstance(value, (list, np.ndarray)) else None
+            if arr is not None and arr.ndim >= 1 and arr.size > _ATTR_ELEM_LIMIT:
+                # Too large for an HDF5 attribute — store as a root-level dataset.
+                if key in self._file:
+                    self._file[key][()] = arr  # overwrite in-place
+                else:
+                    self._file.create_dataset(key, data=arr)
+            else:
+                self._file.attrs[key] = value
 
     def flush(self) -> None:
         """Persist in-memory count to HDF5 attr, then flush to disk."""
@@ -290,8 +305,13 @@ def write_param_attrs_2d(
         f.attrs["temps"] = np.asarray(temps, dtype=np.float64)
         f.attrs["params"] = np.asarray(params, dtype=np.float64)
         f.attrs["tau_max"] = tau_max
-        f.attrs["r2s"] = np.asarray(r2s, dtype=np.int64)
-        f.attrs["s2r"] = np.asarray(s2r, dtype=np.int64)
+        r2s_arr = np.asarray(r2s, dtype=np.int64)
+        s2r_arr = np.asarray(s2r, dtype=np.int64)
+        for key, arr in [("r2s", r2s_arr), ("s2r", s2r_arr)]:
+            if key in f:
+                f[key][()] = arr
+            else:
+                f.create_dataset(key, data=arr)
         f.attrs["seed"] = seed
         f.attrs["seed_history"] = json.dumps(seed_history)
         f.attrs["pt_mode"] = "2d"
@@ -312,8 +332,9 @@ def read_resume_state_2d(path: str | Path) -> tuple[int, dict[str, Any]]:
         temps = np.array(f.attrs["temps"], dtype=np.float64)
         params = np.array(f.attrs["params"], dtype=np.float64)
         tau_max = float(f.attrs["tau_max"])
-        r2s = list(np.array(f.attrs["r2s"], dtype=np.int64))
-        s2r = list(np.array(f.attrs["s2r"], dtype=np.int64))
+        # Support both storage forms: dataset (large grids) and attribute (small grids).
+        r2s = list(np.array(f["r2s"] if "r2s" in f else f.attrs["r2s"], dtype=np.int64))
+        s2r = list(np.array(f["s2r"] if "s2r" in f else f.attrs["s2r"], dtype=np.int64))
         seed_history_raw = json.loads(str(f.attrs["seed_history"]))
         seed_history: list[tuple[int, int]] = [
             (int(pair[0]), int(pair[1])) for pair in seed_history_raw

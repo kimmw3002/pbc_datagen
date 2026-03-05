@@ -433,3 +433,33 @@ class TestSnapshotCount:
         path = tmp_path / "test.h5"
         with h5py.File(path, "w") as f:
             assert _snapshot_count(f) == 0
+
+
+# ---------------------------------------------------------------------------
+# SnapshotWriter — large-array metadata stored as datasets
+# ---------------------------------------------------------------------------
+
+
+class TestLargeArrayMetadata:
+    """Arrays exceeding _ATTR_ELEM_LIMIT must be stored as datasets, not attrs."""
+
+    def test_large_array_stored_as_dataset(self, tmp_path: Path) -> None:
+        """write_metadata routes big arrays to datasets, small ones to attrs."""
+        from pbc_datagen.io import SnapshotWriter
+
+        path = tmp_path / "test.h5"
+        large = np.arange(1000, dtype=np.int64)
+        small = np.array([1, 2, 3], dtype=np.int64)
+
+        with SnapshotWriter(path) as w:
+            w.write_metadata({"r2s": large, "small": small})
+
+        with h5py.File(path, "r") as f:
+            # large array → root-level dataset, NOT an attribute
+            assert "r2s" in f, "r2s should be a root-level dataset"
+            assert "r2s" not in f.attrs, "r2s must not be stored as an attribute"
+            # small array → attribute as before
+            assert "small" in f.attrs, "small array should remain an attribute"
+            # values survive the round-trip
+            np.testing.assert_array_equal(np.array(f["r2s"], dtype=np.int64), large)
+            np.testing.assert_array_equal(f.attrs["small"], small)
