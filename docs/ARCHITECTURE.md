@@ -100,7 +100,7 @@ A simpler alternative for well-behaved parameter points that don't need replica 
 - **Autocorrelation** (`autocorrelation.py`): FFT-based `acf_fft()` (Wiener-Khinchin), `tau_int()` via first zero crossing, `tau_int_multi()` for sweep-dict bottleneck detection.
 - **Spectral** (`spectral.py`): Connectivity check for 2D PT grids. Builds lazy random-walk transition matrix from edge acceptance rates, checks spectral gap (1 − λ₂) via dense `np.linalg.eigh` (grids are small, typically 10–200 nodes). Returns `ConnectivityResult` with Fiedler vector on failure for diagnostics.
 - **Convergence** (`convergence.py`): Two-initialization convergence check. Compares observable streams from independent cold-start and hot-start PT runs using block-averaged Welch t-test with Bonferroni correction. Returns `ConvergenceResult` with per-slot disagreement map.
-- **I/O** (`io.py`): HDF5 snapshot streaming via `SnapshotWriter` context manager. Flat schema: root-level `(M, N, C, L, L)` snapshot dataset + `(M, N)` observable datasets, indexed by slot via `slot_keys` JSON attr. ~4 h5py calls per production round (vs 40k with old per-group schema). Auto-extends datasets on resume. Metadata persisted every round for crash safety. Resume state via `read_resume_state()` / `read_resume_state_2d()` with old per-group fallback.
+- **I/O** (`io.py`): HDF5 snapshot streaming via `SnapshotWriter` context manager. Flat schema: root-level `(M, N, C, L, L)` snapshot dataset + `(M, N)` observable datasets, indexed by slot via `slot_keys` JSON attr. ~4 h5py calls per production round (vs 40k with old per-group schema). Auto-extends datasets on resume. Metadata persisted every round for crash safety. Resume state via `read_resume_state()` / `read_resume_state_2d()` with old per-group fallback. See `docs/HDF5_SCHEMAS.md` for full schema reference (flat vs legacy per-group).
 - **Orchestrator** (`orchestrator.py`): Campaign manager for sequential 1D and 2D PT runs. Handles fresh/resume workflow, file discovery, OMP thread configuration, and seed derivation. Entry points: `generate_dataset()` (1D) and `generate_dataset_2d()` (2D).
 
 ## Directory Layout
@@ -109,10 +109,12 @@ A simpler alternative for well-behaved parameter points that don't need replica 
 pbc_datagen/
 ├── CMakeLists.txt              # Build system (scikit-build-core)
 ├── pyproject.toml              # uv / Python project config
+├── PT_FORMAT.md                # .pt dataset schema reference
 ├── docs/
 │   ├── ARCHITECTURE.md         # This file
 │   ├── PLAN.md                 # Implementation plan
-│   └── LESSONS.md              # Hard-won physics/build/testing insights
+│   ├── LESSONS.md              # Hard-won physics/build/testing insights
+│   └── HDF5_SCHEMAS.md         # Flat vs per-group HDF5 schema reference
 ├── src/cpp/
 │   ├── include/
 │   │   ├── xoshiro256pp.hpp    # Vendored Xoshiro256++ PRNG engine
@@ -148,6 +150,7 @@ pbc_datagen/
 │   ├── test_pt_exchange.py     # pt_exchange single-gap acceptance
 │   ├── test_pt_exchange_round.py # pt_exchange_round coverage & map consistency
 │   ├── test_pt_2d_exchange.py  # 2D PT exchange (T-direction + param-direction)
+│   ├── test_pt_engine_2d.py    # PTEngine2D Phase B soft failure + disagreement slots
 │   ├── test_pt_labels.py       # pt_update_labels, histograms, round-trip counting
 │   ├── test_pt_rounds.py       # pt_collect_obs + pt_rounds integration
 │   ├── test_pt_detailed_balance.py # 2×2 chi-squared for PT (Ising/BC/AT)
@@ -156,6 +159,7 @@ pbc_datagen/
 │   ├── test_io.py              # HDF5 I/O: groups, datasets, resume logic
 │   ├── test_orchestrator.py    # Campaign file discovery, execution, resume
 │   ├── test_single_chain.py    # SingleChainEngine construction + campaign
+│   ├── test_e2e.py             # End-to-end: fresh + resume for all 3 engine types
 │   ├── ising/                  # Ising model tests
 │   │   ├── test_model.py       # Construction, energy, magnetization
 │   │   ├── test_wolff.py       # Wolff cluster kernel + detailed balance
@@ -177,6 +181,8 @@ pbc_datagen/
     ├── demo_ashkin_teller.py   # AT observable time series + 3×2 panel plot
     ├── generate_dataset.py     # Main entry point for 1D PT dataset generation
     ├── generate_single.py      # CLI entry point for single-chain MCMC generation
-    ├── plot_obs_vs_T.py        # Observable vs temperature curves from HDF5
-    └── plot_snapshots.py       # Random snapshot samples from HDF5 temperature bins
+    ├── generate_single_parallel.py # Parallel sweep of (T, param) grid via single-chain
+    ├── convert_to_pt.py        # HDF5 → .pt converter (both schemas)
+    ├── plot_obs_vs_T.py        # Observable vs temperature curves from HDF5 or .pt
+    └── plot_snapshots.py       # Random snapshot samples from HDF5 or .pt
 ```

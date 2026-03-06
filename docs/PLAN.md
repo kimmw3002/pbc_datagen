@@ -176,38 +176,20 @@ Default behaviour is resume. Each param's HDF5 file IS its checkpoint.
 
 File: `python/pbc_datagen/io.py`
 
-#### HDF5 Flat Schema (Batch Writes)
+#### HDF5 Schemas
 
-All snapshots stored in root-level datasets — no per-temperature groups. One file per campaign (param value or 2D grid). ~4 h5py calls per production round instead of 40k with the old per-group schema.
+Two HDF5 schemas exist in this codebase. See `docs/HDF5_SCHEMAS.md` for full
+reference. All reader scripts (`convert_to_pt.py`, `plot_obs_vs_T.py`,
+`plot_snapshots.py`) detect and handle both schemas transparently via
+`"slot_keys" in f.attrs`.
 
-**HDF5 layout:**
-```
-blume_capel_L64_D=1.5000_1709312456789.h5
-├── .attrs
-│   ├── model_type, L, param_value      # campaign identity
-│   ├── T_ladder / temps, params        # temperature/param grid (1D / 2D)
-│   ├── tau_max                         # autocorrelation time from Phase B
-│   ├── r2t, t2r / r2s, s2r            # address maps (1D / 2D)
-│   ├── seed, seed_history              # PRNG audit trail
-│   ├── slot_keys                       # JSON list: index → canonical name
-│   ├── obs_names                       # JSON list: observable dataset names
-│   ├── count                           # actual snapshots written (crash cursor)
-│   └── pt_mode                         # "2d" for 2D PT (absent for 1D)
-├── snapshots   (M, N, C, L, L)  int8     chunks=(1,1,C,L,L)
-├── energy      (M, N)           float64   chunks=(1,1)
-├── m           (M, N)           float64   chunks=(1,1)
-└── abs_m       (M, N)           float64   chunks=(1,1)
-```
+**1. Flat schema (current)** — produced by `SnapshotWriter`. Root-level
+`(M, N, C, L, L)` snapshot dataset + `(M, N)` observable datasets, indexed by
+slot via `slot_keys` JSON attr. ~4 h5py calls per production round.
 
-- **M** = number of slots (temperatures for 1D PT, T×param grid points for 2D PT, 1 for single-chain).
-- **N** = pre-allocated snapshot capacity (auto-extends by doubling on resume).
-- **slot_keys** maps dataset index → canonical name (e.g. `["T=1.5000", "T=2.0000"]` or `["T=1.5000_D=0.0000", ...]`).
-- **count** tracks actually written rounds. Persisted on `flush()`/`close()` only — crash loses at most one round.
-- **Metadata written every round** alongside `flush()` so crash-resume always has consistent state.
-
-**Snapshot shape:** Ising/BC: `C=1` → `(M, N, 1, L, L)` int8. AT: `C=2` → `(M, N, 2, L, L)` int8.
-
-**Observables:** each snapshot round writes one value per slot per observable. Stored as `(M, N)` float64 datasets keyed by observable name. The model's `observables()` keys become HDF5 dataset names.
+**2. Per-group schema (legacy)** — produced by early `PTEngine2D` runs. Each
+`T=..._D=...` combination is an HDF5 group containing its own `snapshots` and
+observable datasets. ~7500x slower for large grids.
 
 **SnapshotWriter API:**
 1. `create_datasets(slot_keys, n_snapshots, C, L, obs_names)` — fresh run: pre-allocate flat datasets
@@ -432,27 +414,39 @@ no ladder tuning. Uses the same C++ `sweep()` API.
 
 ---
 
-## Phase 3: Validation & Diagnostics (manual)
+## Phase 4: Post-Processing & Validation
 
-Validation and diagnostics will be done by hand, not via automated tests.
+### 4.1 — .pt Conversion & Plot Scripts ✅
+
+- `scripts/convert_to_pt.py` — HDF5 → .pt converter. Handles both flat and per-group HDF5 schemas. Produces a flat list of dicts per `PT_FORMAT.md`. T and param values rounded to `%.4f`.
+- `scripts/plot_obs_vs_T.py` — Observable vs T curves + 2D heatmaps. Supports both HDF5 and .pt input.
+- `scripts/plot_snapshots.py` — Random snapshot samples with T/param filtering. Supports both HDF5 and .pt input.
+
+See `PT_FORMAT.md` for .pt schema, `docs/HDF5_SCHEMAS.md` for HDF5 schema reference.
+
+### 4.2 — Manual Validation (ongoing)
+
+Validation and diagnostics done by hand, not via automated tests.
 
 ## Test Plan
 
+**Total: 331 tests (322 run by default, 9 integration-only).**
+
 ### Phase 1 Tests ✅
 
-55 tests across `tests/ising/`, `tests/blume_capel/`, `tests/ashkin_teller/`, `tests/test_foundation.py`, `tests/test_observable_cache.py`. All pass.
+179 tests across `tests/ising/` (51), `tests/blume_capel/` (49), `tests/ashkin_teller/` (50), `tests/test_foundation.py` (15), `tests/test_observable_cache.py` (14). All pass.
 
 ### Phase 1.5 Tests — C++ PT Inner Loop ✅
 
-22 tests: `test_pt_exchange.py` (3), `test_pt_exchange_round.py` (4), `test_pt_labels.py` (5), `test_pt_rounds.py` (6), `test_pt_detailed_balance.py` (4 integration).
+25 tests: `test_pt_exchange.py` (3), `test_pt_exchange_round.py` (4), `test_pt_labels.py` (8), `test_pt_rounds.py` (6), `test_pt_detailed_balance.py` (4 integration).
 
 ### Phase 2 Tests — Autocorrelation ✅
 
-7 tests: `tests/test_autocorrelation.py`.
+9 tests: `tests/test_autocorrelation.py`.
 
 ### Phase 2 Tests — PT Orchestration ✅
 
-15 tests in `tests/test_parallel_tempering.py`:
+20 tests in `tests/test_parallel_tempering.py`:
 - KTH redistribution: linear-f no-change, bottleneck concentrates, endpoints fixed, sorted output
 - Convergence: converged, temps unstable, f nonlinear
 - tune_ladder: converges on 4×4 Ising, aborts on absurd range
@@ -461,7 +455,7 @@ Validation and diagnostics will be done by hand, not via automated tests.
 
 ### Phase 2 Tests — I/O (`tests/test_io.py`) ✅
 
-16 tests: `TestSnapshotWriterCreation` (2), `TestSnapshotWriterWriteRound` (3), `TestSnapshotWriterResume` (1), `TestWriteParamAttrs` (2), `TestReadResumeState` (4), `TestSnapshotCount` (4).
+17 tests: `TestSnapshotWriterCreation` (2), `TestSnapshotWriterWriteRound` (3), `TestSnapshotWriterResume` (1), `TestWriteParamAttrs` (2), `TestReadResumeState` (4), `TestSnapshotCount` (4), + 1 additional.
 
 - [x] Unit: `SnapshotWriter` creates flat datasets with correct shape and attrs
 - [x] Unit: `write_round` batch-writes spins + observables, auto-extends on overflow
@@ -480,15 +474,23 @@ Validation and diagnostics will be done by hand, not via automated tests.
 - [x] Integration: resume reuses file, appends to target, extends seed history
 
 
-### Phase 3 Tests — 2D PT Exchange (`tests/test_pt_2d_exchange.py`) 🚧
+### Phase 3 Tests — 2D PT Exchange (`tests/test_pt_2d_exchange.py`) ✅
 
-8 tests: `TestPtExchangeParam` (3), `TestPt2dDetailedBalanceBlumeCapel` (2 integration), `TestPt2dDetailedBalanceAshkinTeller` (3 integration).
+10 tests: `TestPtExchangeParam` (5), `TestPt2dDetailedBalanceBlumeCapel` (2 integration), `TestPt2dDetailedBalanceAshkinTeller` (3 integration).
 
-- [ ] Unit: `pt_exchange_param` — same param always accepts (Δ=0)
-- [ ] Unit: `pt_exchange_param` — large favorable Δ always accepts
-- [ ] Unit: `pt_exchange_param` — acceptance rate matches exp(Δ) statistically
-- [ ] Integration: BC 2×2 on T×D grid (D=0.0–0.5, D=0.3–0.8), chi-squared vs exact P(E)
-- [ ] Integration: AT 2×2 on T×U grid (U=0.0–0.5, U=0.5–1.5, U=1.0–1.5), chi-squared vs exact P(E)
+- [x] Unit: `pt_exchange_param` — same param always accepts (Δ=0)
+- [x] Unit: `pt_exchange_param` — large favorable Δ always accepts
+- [x] Unit: `pt_exchange_param` — acceptance rate matches exp(Δ) statistically
+- [x] Integration: BC 2×2 on T×D grid (D=0.0–0.5, D=0.3–0.8), chi-squared vs exact P(E)
+- [x] Integration: AT 2×2 on T×U grid (U=0.0–0.5, U=0.5–1.5, U=1.0–1.5), chi-squared vs exact P(E)
+
+### Phase 3 Tests — 2D PT Engine (`tests/test_pt_engine_2d.py`) ✅
+
+4 tests: `TestPhaseB_SoftFailure` — soft failure on convergence (no exception, disagreement slots populated, τ_max set, clean convergence has empty disagreement).
+
+### E2E Tests (`tests/test_e2e.py`) ✅
+
+3 tests: fresh + resume round-trips for SingleChain, 1D PT, and 2D PT. Marked `not integration` — runs by default.
 
 
 ### Single-Chain Tests — Single-Chain Runner (`tests/test_single_chain.py`) ✅

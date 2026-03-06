@@ -1,11 +1,12 @@
 #!/usr/bin/env python
-"""Plot random snapshot samples from each temperature in an HDF5 dataset."""
+"""Plot random snapshot samples from each temperature in an HDF5 or .pt dataset."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
+from collections import defaultdict
 from pathlib import Path
 
 import h5py
@@ -69,9 +70,95 @@ def plot_two_channel(axes: np.ndarray, snapshots: np.ndarray, indices: list[int]
             ax_st.set_ylabel("στ", fontsize=10)
 
 
+def _plot_pt(args: argparse.Namespace) -> None:
+    """Handle .pt input."""
+    import torch
+
+    rng = np.random.default_rng(args.seed)
+    records = torch.load(args.input, weights_only=False)
+    if not records:
+        print("Empty .pt file")
+        return
+
+    sample = records[0]
+    C_val = sample["state"].shape[0]
+    L = sample["state"].shape[-1]
+
+    # Infer param
+    if "D" in sample:
+        param_label: str | None = "D"
+    elif "U" in sample:
+        param_label = "U"
+    else:
+        param_label = None
+
+    is_2d = param_label is not None
+    model_type = args.input.stem
+
+    # Group by (T, param)
+    groups: dict[tuple[float, float], list[dict]] = defaultdict(list)
+    for rec in records:
+        pv = round(rec[param_label], 4) if param_label else 0.0
+        groups[(round(rec["T"], 4), pv)].append(rec)
+
+    # --list
+    if args.list:
+        temps = sorted({t for t, _ in groups})
+        params = sorted({p for _, p in groups})
+        print(f"T values ({len(temps)}):  {', '.join(f'{t:.4f}' for t in temps)}")
+        if is_2d:
+            print(f"{param_label} values ({len(params)}):  {', '.join(f'{p:.4f}' for p in params)}")
+        return
+
+    # Apply filters
+    slot_iter = sorted(groups.keys(), key=lambda x: (x[1], x[0]))
+    if args.T is not None:
+        t_set = {round(t, 4) for t in args.T}
+        slot_iter = [(t, p) for t, p in slot_iter if t in t_set]
+    if args.param is not None:
+        p_set = {round(p, 4) for p in args.param}
+        slot_iter = [(t, p) for t, p in slot_iter if p in p_set]
+
+    for T_val, pv in slot_iter:
+        recs = groups[(T_val, pv)]
+        N = len(recs)
+        if N == 0:
+            continue
+        n_pick = min(args.n, N)
+        indices = sorted(rng.choice(N, size=n_pick, replace=False).tolist())
+
+        # Stack states into (N, C, L, L)
+        snap_data = np.stack([recs[i]["state"].numpy() for i in range(N)])
+
+        if C_val == 1:
+            ncols = n_pick
+            fig, axes = plt.subplots(1, ncols, figsize=(1.5 * ncols, 2), squeeze=False)
+            plot_single_channel(axes[0], snap_data, indices)
+        else:
+            ncols = n_pick
+            fig, axes = plt.subplots(3, ncols, figsize=(1.5 * ncols, 4.5), squeeze=False)
+            plot_two_channel(axes, snap_data, indices)
+
+        if is_2d:
+            suptitle = f"{model_type} L={L}  T={T_val:.4f}  {param_label}={pv:.4f}"
+        else:
+            suptitle = f"{model_type} L={L}  T={T_val:.4f}"
+        fig.suptitle(suptitle, fontsize=11)
+        fig.tight_layout()
+
+        if is_2d:
+            out_name = f"{args.input.stem}_T={T_val:.4f}_{param_label}={pv:.4f}.png"
+        else:
+            out_name = f"{args.input.stem}_T={T_val:.4f}.png"
+        out_path = args.output_dir / out_name
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        print(f"Saved → {out_path}")
+        plt.close(fig)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot snapshot samples from HDF5 dataset")
-    parser.add_argument("hdf5", type=Path, help="Path to HDF5 file")
+    parser = argparse.ArgumentParser(description="Plot snapshot samples from HDF5 or .pt dataset")
+    parser.add_argument("input", type=Path, help="Path to HDF5 or .pt file")
     parser.add_argument("--n", type=int, default=10, help="Snapshots per temperature (default: 10)")
     parser.add_argument(
         "-o", "--output-dir", type=Path, default=Path("images"), help="Output directory"
@@ -91,9 +178,17 @@ def main() -> None:
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.input.suffix == ".pt":
+        _plot_pt(args)
+        if not args.no_show:
+            print(f"\nAll snapshots saved to {args.output_dir}/")
+        return
+
+    # --- HDF5 path (original code) ---
     rng = np.random.default_rng(args.seed)
 
-    with h5py.File(args.hdf5, "r") as f:
+    with h5py.File(args.input, "r") as f:
         model_type = f.attrs["model_type"]
         L = f.attrs["L"]
         is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
@@ -190,9 +285,9 @@ def main() -> None:
                 fig.tight_layout()
 
                 if is_2d:
-                    out_name = f"{args.hdf5.stem}_T={T_val:.4f}_{param_label}={pv:.4f}.png"
+                    out_name = f"{args.input.stem}_T={T_val:.4f}_{param_label}={pv:.4f}.png"
                 else:
-                    out_name = f"{args.hdf5.stem}_T={T_val:.4f}.png"
+                    out_name = f"{args.input.stem}_T={T_val:.4f}.png"
                 out_path = args.output_dir / out_name
                 fig.savefig(out_path, dpi=150, bbox_inches="tight")
                 print(f"Saved → {out_path}")
@@ -266,9 +361,9 @@ def main() -> None:
                 fig.tight_layout()
 
                 if is_2d:
-                    out_name = f"{args.hdf5.stem}_T={T_val:.4f}_{param_label}={pv:.4f}.png"
+                    out_name = f"{args.input.stem}_T={T_val:.4f}_{param_label}={pv:.4f}.png"
                 else:
-                    out_name = f"{args.hdf5.stem}_T={T_val:.4f}.png"
+                    out_name = f"{args.input.stem}_T={T_val:.4f}.png"
                 out_path = args.output_dir / out_name
                 fig.savefig(out_path, dpi=150, bbox_inches="tight")
                 print(f"Saved → {out_path}")

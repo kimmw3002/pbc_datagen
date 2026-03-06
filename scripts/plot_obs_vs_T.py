@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Plot ⟨O⟩ vs T curves from an HDF5 dataset file."""
+"""Plot ⟨O⟩ vs T curves from an HDF5 or .pt dataset file."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import re
+from collections import defaultdict
 from pathlib import Path
 
 import h5py
@@ -30,9 +31,104 @@ def parse_slot_2d(group_name: str, param_label: str) -> tuple[float, float]:
     return float(m.group(1)), float(m.group(2))
 
 
+# Type aliases for the data structures shared between loaders and plotting
+Data1D = dict[str, tuple[np.ndarray, np.ndarray]]
+Data2D = dict[str, dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]]]
+
+
+def load_pt_obs(
+    path: Path, obs_filter: list[str] | None
+) -> tuple[
+    str,
+    int,
+    bool,
+    str | None,
+    list[str],
+    np.ndarray | None,
+    Data1D | None,
+    Data2D | None,
+    list[float] | None,
+]:
+    """Load .pt file and return plotting data.
+
+    Returns (model_type, L, is_2d, param_label, obs_names,
+             temps, data_1d, data_2d, param_vals)
+    """
+    import torch
+
+    records = torch.load(path, weights_only=False)
+    if not records:
+        raise ValueError(f"Empty .pt file: {path}")
+
+    sample = records[0]
+    L = int(sample["state"].shape[-1])
+
+    # Infer param from keys
+    if "D" in sample:
+        param_label: str | None = "D"
+    elif "U" in sample:
+        param_label = "U"
+    else:
+        param_label = None
+
+    is_2d = param_label is not None
+
+    # Observable names = all keys except state, T, param
+    skip = {"state", "T"}
+    if param_label:
+        skip.add(param_label)
+    all_obs = [k for k in sample if k not in skip]
+    obs_names = obs_filter if obs_filter else all_obs
+
+    if is_2d:
+        assert param_label is not None
+        groups: dict[tuple[float, float], list[dict]] = defaultdict(list)
+        for rec in records:
+            groups[(round(rec["T"], 4), round(rec[param_label], 4))].append(rec)
+
+        param_vals = sorted({pv for _, pv in groups})
+        data_2d: Data2D = {}
+        for obs in obs_names:
+            data_2d[obs] = {}
+            for pv in param_vals:
+                t_recs: dict[float, list[dict]] = defaultdict(list)
+                for (t, p), recs in groups.items():
+                    if p == pv:
+                        t_recs[t].extend(recs)
+                ts = np.array(sorted(t_recs))
+                means = []
+                stderrs = []
+                for t in ts:
+                    vals = np.array([r[obs] for r in t_recs[t]])
+                    means.append(np.mean(vals))
+                    n = len(vals)
+                    stderrs.append(np.std(vals, ddof=1) / np.sqrt(n) if n > 1 else 0.0)
+                data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+
+        return (path.stem, L, True, param_label, obs_names, None, None, data_2d, param_vals)
+    else:
+        t_groups: dict[float, list[dict]] = defaultdict(list)
+        for rec in records:
+            t_groups[round(rec["T"], 4)].append(rec)
+
+        temps = np.array(sorted(t_groups))
+        data_1d: Data1D = {}
+        for obs in obs_names:
+            means = []
+            stderrs = []
+            for t in temps:
+                vals = np.array([r[obs] for r in t_groups[t]])
+                means.append(np.mean(vals))
+                n = len(vals)
+                stderrs.append(np.std(vals, ddof=1) / np.sqrt(n) if n > 1 else 0.0)
+            data_1d[obs] = (np.array(means), np.array(stderrs))
+
+        return (path.stem, L, False, None, obs_names, temps, data_1d, None, None)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot ⟨O⟩ vs T from HDF5 dataset")
-    parser.add_argument("hdf5", type=Path, help="Path to HDF5 file")
+    parser = argparse.ArgumentParser(description="Plot ⟨O⟩ vs T from HDF5 or .pt dataset")
+    parser.add_argument("input", type=Path, help="Path to HDF5 or .pt file")
     parser.add_argument("--obs", nargs="+", help="Observable names to plot (default: all)")
     parser.add_argument("-o", "--output", type=Path, help="Output PNG path (default: auto)")
     parser.add_argument("--no-show", action="store_true", help="Skip plt.show()")
@@ -43,135 +139,162 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    with h5py.File(args.hdf5, "r") as f:
-        model_type = f.attrs["model_type"]
-        L = f.attrs["L"]
-        is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
-        is_flat = "slot_keys" in f.attrs
-        _ds = f.get("disagreement_slots") or f.attrs.get("disagreement_slots", [])
-        _disagree_indices: list[int] = list(np.asarray(_ds, dtype=int).tolist())
-        if is_flat and _disagree_indices:
-            _all_keys: list[str] = json.loads(str(f.attrs["slot_keys"]))
-            disagree_slot_keys: list[str] = [_all_keys[i] for i in _disagree_indices]
-        else:
-            disagree_slot_keys = []
-        if disagree_slot_keys:
-            import warnings
+    input_path: Path = args.input
+    is_pt = input_path.suffix == ".pt"
 
-            warnings.warn(
-                f"HDF5 contains {len(disagree_slot_keys)} unconverged slot(s) "
-                f"(Phase B soft failure). Pass --rigorous to exclude them.",
-                stacklevel=2,
-            )
+    # Variables set by both branches, used by plotting code below
+    is_2d = False
+    is_flat = False
+    param_label: str | None = None
+    param_value: float = 0.0
+    obs_names: list[str] = []
+    temps: np.ndarray = np.array([])
+    data_1d: Data1D = {}
+    data_2d: Data2D = {}
+    param_vals: list[float] = []
+    model_type: object = ""
+    L: object = 0
+    # For 2D heatmaps from HDF5
+    slots_for_heatmap: list[tuple[float, ...]] | None = None
 
-        if is_flat:
-            slot_keys = json.loads(str(f.attrs["slot_keys"]))
-            count = int(f.attrs["count"])
-            obs_names_all = json.loads(str(f.attrs["obs_names"]))
-            obs_names = args.obs if args.obs else obs_names_all
-
-            if is_2d:
-                param_label = str(f.attrs["param_label"])
-                # Parse (T, param, slot_idx) from slot_keys
-                slots = []
-                for i, key in enumerate(slot_keys):
-                    T_val, pv = parse_slot_2d(key, param_label)
-                    slots.append((T_val, pv, i))
-                slots.sort(key=lambda x: (x[1], x[0]))
-                if args.rigorous and disagree_slot_keys:
-                    _excl = set(disagree_slot_keys)
-                    slots = [(t, pv, i) for t, pv, i in slots if slot_keys[i] not in _excl]
-
-                param_vals = sorted(set(s[1] for s in slots))
-                data_2d: dict[str, dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
-                for obs in obs_names:
-                    data_2d[obs] = {}
-                    for pv in param_vals:
-                        pv_slots = [(t, idx) for t, p, idx in slots if p == pv]
-                        ts = np.array([t for t, _ in pv_slots])
-                        means = []
-                        stderrs = []
-                        for _, idx in pv_slots:
-                            vals = f[obs][idx, :count]
-                            means.append(np.mean(vals))
-                            stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                        data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+    if is_pt:
+        (model_type, L, is_2d, param_label, obs_names, _temps, _d1, _d2, _pv) = load_pt_obs(
+            input_path, args.obs
+        )
+        if _temps is not None:
+            temps = _temps
+        if _d1 is not None:
+            data_1d = _d1
+        if _d2 is not None:
+            data_2d = _d2
+        if _pv is not None:
+            param_vals = _pv
+    else:
+        with h5py.File(input_path, "r") as f:
+            model_type = f.attrs["model_type"]
+            L = f.attrs["L"]
+            is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
+            is_flat = "slot_keys" in f.attrs
+            _ds = f.get("disagreement_slots") or f.attrs.get("disagreement_slots", [])
+            _disagree_indices: list[int] = list(np.asarray(_ds, dtype=int).tolist())
+            if is_flat and _disagree_indices:
+                _all_keys: list[str] = json.loads(str(f.attrs["slot_keys"]))
+                disagree_slot_keys: list[str] = [_all_keys[i] for i in _disagree_indices]
             else:
-                param_value = f.attrs.get("param_value", 0.0)
-                # Parse T from slot_keys
-                t_slots = []
-                for i, key in enumerate(slot_keys):
-                    T_val = parse_temperature(key)
-                    t_slots.append((T_val, i))
-                t_slots.sort(key=lambda x: x[0])
-                if args.rigorous and disagree_slot_keys:
-                    _excl = set(disagree_slot_keys)
-                    t_slots = [(t, i) for t, i in t_slots if slot_keys[i] not in _excl]
+                disagree_slot_keys = []
+            if disagree_slot_keys:
+                import warnings
 
-                temps = np.array([t for t, _ in t_slots])
-                data_1d: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-                for name in obs_names:
-                    means = []
-                    stderrs = []
-                    for _, idx in t_slots:
-                        vals = f[name][idx, :count]
-                        means.append(np.mean(vals))
-                        stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                    data_1d[name] = (np.array(means), np.array(stderrs))
-        else:
-            # Old per-group schema fallback
-            if is_2d:
-                param_label = str(f.attrs["param_label"])
-                slots_old = sorted(
-                    [
-                        (*parse_slot_2d(name, param_label), name)
-                        for name in f
-                        if name.startswith("T=")
-                    ],
-                    key=lambda x: (x[1], x[0]),
+                warnings.warn(
+                    f"HDF5 contains {len(disagree_slot_keys)} unconverged slot(s) "
+                    f"(Phase B soft failure). Pass --rigorous to exclude them.",
+                    stacklevel=2,
                 )
 
-                first_group = f[slots_old[0][2]]
-                all_obs = [k for k in first_group if k != "snapshots"]
-                obs_names = args.obs if args.obs else all_obs
+            if is_flat:
+                slot_keys = json.loads(str(f.attrs["slot_keys"]))
+                count = int(f.attrs["count"])
+                obs_names_all = json.loads(str(f.attrs["obs_names"]))
+                obs_names = args.obs if args.obs else obs_names_all
 
-                param_vals = sorted(set(s[1] for s in slots_old))
-                data_2d = {}
-                for obs in obs_names:
-                    data_2d[obs] = {}
-                    for pv in param_vals:
-                        pv_slots = [(t, gn) for t, p, gn in slots_old if p == pv]
-                        ts = np.array([t for t, _ in pv_slots])
+                if is_2d:
+                    param_label = str(f.attrs["param_label"])
+                    slots = []
+                    for i, key in enumerate(slot_keys):
+                        T_val, pv = parse_slot_2d(key, param_label)
+                        slots.append((T_val, pv, i))
+                    slots.sort(key=lambda x: (x[1], x[0]))
+                    if args.rigorous and disagree_slot_keys:
+                        _excl = set(disagree_slot_keys)
+                        slots = [(t, pv, i) for t, pv, i in slots if slot_keys[i] not in _excl]
+
+                    param_vals = sorted(set(s[1] for s in slots))
+                    for obs in obs_names:
+                        data_2d[obs] = {}
+                        for pv in param_vals:
+                            pv_slots = [(t, idx) for t, p, idx in slots if p == pv]
+                            ts = np.array([t for t, _ in pv_slots])
+                            means = []
+                            stderrs = []
+                            for _, idx in pv_slots:
+                                vals = f[obs][idx, :count]
+                                means.append(np.mean(vals))
+                                stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+                            data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+                    slots_for_heatmap = [(t, pv, i) for t, pv, i in slots]
+                else:
+                    param_value = f.attrs.get("param_value", 0.0)
+                    t_slots = []
+                    for i, key in enumerate(slot_keys):
+                        T_val = parse_temperature(key)
+                        t_slots.append((T_val, i))
+                    t_slots.sort(key=lambda x: x[0])
+                    if args.rigorous and disagree_slot_keys:
+                        _excl = set(disagree_slot_keys)
+                        t_slots = [(t, i) for t, i in t_slots if slot_keys[i] not in _excl]
+
+                    temps = np.array([t for t, _ in t_slots])
+                    for name in obs_names:
                         means = []
                         stderrs = []
-                        for _, gname in pv_slots:
-                            vals = f[gname][obs][:]
+                        for _, idx in t_slots:
+                            vals = f[name][idx, :count]
                             means.append(np.mean(vals))
                             stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                        data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+                        data_1d[name] = (np.array(means), np.array(stderrs))
             else:
-                param_value = f.attrs["param_value"]
-                t_groups = sorted(
-                    [(parse_temperature(name), name) for name in f if name.startswith("T=")],
-                    key=lambda x: x[0],
-                )
+                # Old per-group schema fallback
+                if is_2d:
+                    param_label = str(f.attrs["param_label"])
+                    slots_old = sorted(
+                        [
+                            (*parse_slot_2d(name, param_label), name)
+                            for name in f
+                            if name.startswith("T=")
+                        ],
+                        key=lambda x: (x[1], x[0]),
+                    )
 
-                first_group = f[t_groups[0][1]]
-                all_obs = [k for k in first_group if k != "snapshots"]
-                obs_names = args.obs if args.obs else all_obs
+                    first_group = f[slots_old[0][2]]
+                    all_obs = [k for k in first_group if k != "snapshots"]
+                    obs_names = args.obs if args.obs else all_obs
 
-                temps = np.array([t for t, _ in t_groups])
-                data_1d = {}
-                for name in obs_names:
-                    means = []
-                    stderrs = []
-                    for _, gname in t_groups:
-                        vals = f[gname][name][:]
-                        means.append(np.mean(vals))
-                        stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                    data_1d[name] = (np.array(means), np.array(stderrs))
+                    param_vals = sorted(set(s[1] for s in slots_old))
+                    for obs in obs_names:
+                        data_2d[obs] = {}
+                        for pv in param_vals:
+                            pv_slots = [(t, gn) for t, p, gn in slots_old if p == pv]
+                            ts = np.array([t for t, _ in pv_slots])
+                            means = []
+                            stderrs = []
+                            for _, gname in pv_slots:
+                                vals = f[gname][obs][:]
+                                means.append(np.mean(vals))
+                                stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+                            data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
+                    slots_for_heatmap = [(t, pv, gn) for t, pv, gn in slots_old]
+                else:
+                    param_value = f.attrs["param_value"]
+                    t_groups = sorted(
+                        [(parse_temperature(name), name) for name in f if name.startswith("T=")],
+                        key=lambda x: x[0],
+                    )
 
-    # Plot: subplot grid with ceil(n/2) rows × 2 cols
+                    first_group = f[t_groups[0][1]]
+                    all_obs = [k for k in first_group if k != "snapshots"]
+                    obs_names = args.obs if args.obs else all_obs
+
+                    temps = np.array([t for t, _ in t_groups])
+                    for name in obs_names:
+                        means = []
+                        stderrs = []
+                        for _, gname in t_groups:
+                            vals = f[gname][name][:]
+                            means.append(np.mean(vals))
+                            stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+                        data_1d[name] = (np.array(means), np.array(stderrs))
+
+    # --- Plotting (shared by both branches) ---
     n_obs = len(obs_names)
     ncols = 2
     nrows = math.ceil(n_obs / ncols)
@@ -217,46 +340,57 @@ def main() -> None:
     fig.suptitle(title, fontsize=14)
     fig.tight_layout()
 
-    out_path = args.output or Path(f"images/{args.hdf5.stem}_obs_vs_T.png")
+    out_path = args.output or Path(f"images/{input_path.stem}_obs_vs_T.png")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"Saved → {out_path}")
 
     # --- 2D heatmap (separate PNG per observable) ---
     if is_2d:
-        source = slots if is_flat else slots_old  # type: ignore[possibly-undefined]
-        t_vals = sorted(set(s[0] for s in source))
-        for obs in obs_names:
-            grid = np.zeros((len(param_vals), len(t_vals)))
-            for pi, pv in enumerate(param_vals):
-                ts_arr, mean, _ = data_2d[obs][pv]
-                for ti, t in enumerate(t_vals):
-                    ix = int(np.argmin(np.abs(ts_arr - t)))
-                    grid[pi, ti] = mean[ix]
+        if is_pt:
+            # For .pt, derive T values from data_2d
+            first_obs_data = data_2d[obs_names[0]]
+            all_ts: set[float] = set()
+            for pv in param_vals:
+                all_ts.update(first_obs_data[pv][0].tolist())
+            t_vals = sorted(all_ts)
+        elif slots_for_heatmap is not None:
+            t_vals = sorted(set(s[0] for s in slots_for_heatmap))
+        else:
+            t_vals = []
 
-            fig_h, ax_h = plt.subplots(figsize=(8, 6))
-            abs_obs = ("abs_m", "q", "abs_m_sigma", "abs_m_tau", "abs_m_baxter")
-            vmin: float | None = 0 if obs in abs_obs else None
-            vmax: float | None = 1 if obs in abs_obs else None
-            im = ax_h.imshow(
-                grid,
-                aspect="auto",
-                origin="lower",
-                extent=(t_vals[0], t_vals[-1], param_vals[0], param_vals[-1]),
-                cmap="RdBu_r",
-                vmin=vmin,
-                vmax=vmax,
-            )
-            ax_h.set_xlabel("T")
-            ax_h.set_ylabel(param_label)
-            ax_h.set_title(f"⟨{obs}⟩  —  {model_type} L={L}")
-            fig_h.colorbar(im, ax=ax_h, label=f"⟨{obs}⟩")
-            fig_h.tight_layout()
+        if t_vals:
+            for obs in obs_names:
+                grid = np.zeros((len(param_vals), len(t_vals)))
+                for pi, pv in enumerate(param_vals):
+                    ts_arr, mean, _ = data_2d[obs][pv]
+                    for ti, t in enumerate(t_vals):
+                        ix = int(np.argmin(np.abs(ts_arr - t)))
+                        grid[pi, ti] = mean[ix]
 
-            hm_path = out_path.parent / f"{args.hdf5.stem}_heatmap_{obs}.png"
-            fig_h.savefig(hm_path, dpi=150, bbox_inches="tight")
-            print(f"Saved → {hm_path}")
-            plt.close(fig_h)
+                fig_h, ax_h = plt.subplots(figsize=(8, 6))
+                abs_obs = ("abs_m", "q", "abs_m_sigma", "abs_m_tau", "abs_m_baxter")
+                vmin: float | None = 0 if obs in abs_obs else None
+                vmax: float | None = 1 if obs in abs_obs else None
+                im = ax_h.imshow(
+                    grid,
+                    aspect="auto",
+                    origin="lower",
+                    extent=(t_vals[0], t_vals[-1], param_vals[0], param_vals[-1]),
+                    cmap="RdBu_r",
+                    vmin=vmin,
+                    vmax=vmax,
+                )
+                ax_h.set_xlabel("T")
+                ax_h.set_ylabel(param_label or "")
+                ax_h.set_title(f"⟨{obs}⟩  —  {model_type} L={L}")
+                fig_h.colorbar(im, ax=ax_h, label=f"⟨{obs}⟩")
+                fig_h.tight_layout()
+
+                hm_path = out_path.parent / f"{input_path.stem}_heatmap_{obs}.png"
+                fig_h.savefig(hm_path, dpi=150, bbox_inches="tight")
+                print(f"Saved → {hm_path}")
+                plt.close(fig_h)
 
     if not args.no_show:
         plt.show()

@@ -1,31 +1,44 @@
-# Ising
+# .pt Dataset Format
 
-## ising_128_renew.pt
+Each `.pt` file is a flat list of dicts saved with `torch.save()`:
 
-The ising_128_renew.pt contains:
+```python
+records = torch.load("dataset.pt", weights_only=False)
+# records[i] is a dict with "state", "T", observables, and optionally a Hamiltonian parameter
+```
 
+## Ising
 
-`[{"state": S_0, "beta": b_0}, {"state": S_1, "beta": b_1}, ...]`
+```python
+{"state": Tensor(1,L,L), "T": float, "energy": float, "m": float, "abs_m": float}
+```
 
-## Configuration
-Where:
-- state: Final spin configurations as L×L tensors, L = 128. Each spin has value +1 or -1.
-- beta: Beta values, where beta = 0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.56, 0.58, 0.60
+- `state`: int8 tensor, spins in {-1, +1}, shape `(1, L, L)`
+- `T`: temperature
+- Observables: `energy`, `m`, `abs_m`
 
-The critical beta is $\beta_c = 0.4407$ so beta until 0.44 is disordered, from 0.46 is ordered.
+## Blume-Capel
 
-Each beta value has 1,000 snapshots. So 16 * 1,000 = 16,000 snapshots in total.
+```python
+{"state": Tensor(1,L,L), "T": float, "D": float, "energy": float, "m": float, "abs_m": float, "q": float}
+```
 
-# Blume-Capel
+- `state`: int8 tensor, spins in {-1, 0, +1}, shape `(1, L, L)`
+- `T`: temperature, `D`: crystal field
+- Observables: `energy`, `m`, `abs_m`, `q`
 
-The blumecapel.pt contains:
+## Ashkin-Teller
 
-`[{"state": S_0, "beta": b_0, "delta": D_0}, {"state": S_1, "beta": b_1, "delta": D_1}, ...]`
+```python
+{"state": Tensor(2,L,L), "T": float, "U": float, "energy": float, "m_sigma": float, "abs_m_sigma": float, "m_tau": float, "abs_m_tau": float, "m_baxter": float, "abs_m_baxter": float}
+```
 
-## Configuration
-Where:
-- state: Final spin configurations as L×L tensors, L = 64. Each spin has value +1 or 0 or -1.
-- beta: beta values, where beta = 0.50 to 3.00.
-- delta: delta values, where delta = 1.70 to 2.20 (step 0.01)
+- `state`: int8 tensor, 2 layers (sigma, tau), spins in {-1, +1}, shape `(2, L, L)`
+- `T`: temperature, `U`: 4-spin coupling
+- Observables: `energy`, `m_sigma`, `abs_m_sigma`, `m_tau`, `abs_m_tau`, `m_baxter`, `abs_m_baxter`
 
-Each beta, delta value pair has 100 snapshots. 108,200 snapshots in total.
+## Notes
+
+- All `state` tensors are `torch.int8`
+- No compression on `torch.save()`
+- Model type can be inferred from keys: `"D"` present = blume_capel, `"U"` present = ashkin_teller, neither = ising
