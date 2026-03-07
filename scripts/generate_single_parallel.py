@@ -14,15 +14,16 @@ the summary table shows OK / FAIL for every task.
 from __future__ import annotations
 
 import argparse
+import collections
 import os
-import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
 from loguru import logger
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
@@ -33,13 +34,13 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.table import Table
+from rich.text import Text
 
 VALID_MODELS = ("ising", "blume_capel", "ashkin_teller")
 
 console = Console()
 
 _FMT_PLAIN = "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {message}"
-_FMT_COLOR = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | {message}"
 
 
 # ---------------------------------------------------------------------------
@@ -47,8 +48,17 @@ _FMT_COLOR = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</lev
 # ---------------------------------------------------------------------------
 
 
+# Ring buffer for the last N log lines shown in the Live display.
+_LOG_LINES: collections.deque[str] = collections.deque(maxlen=20)
+
+
+def _deque_sink(message: str) -> None:
+    """Loguru sink that appends formatted lines to the shared deque."""
+    _LOG_LINES.append(message.rstrip("\n"))
+
+
 def _setup_logging(output_dir: Path) -> Path:
-    """Configure loguru: stdout INFO + timestamped log file DEBUG (enqueue=True).
+    """Configure loguru: in-memory deque (INFO) + timestamped log file (DEBUG).
 
     Returns the log file path.
     """
@@ -59,7 +69,8 @@ def _setup_logging(output_dir: Path) -> Path:
     log_file = log_dir / f"parallel_{ts}.log"
 
     logger.remove()
-    logger.add(sys.stdout, format=_FMT_COLOR, level="INFO", colorize=True)
+    # Live-display sink: INFO lines are captured into _LOG_LINES deque
+    logger.add(_deque_sink, format=_FMT_PLAIN, level="INFO", colorize=False)
     # enqueue=True: background thread serialises writes → safe across processes
     logger.add(str(log_file), format=_FMT_PLAIN, level="DEBUG", enqueue=True)
 
@@ -320,6 +331,29 @@ def main(argv: list[str] | None = None) -> None:
     t0 = time.perf_counter()
     results: list[tuple[float, float, str | None, str | None]] = []
 
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+    )
+    bar = progress.add_task("Running tasks", total=len(tasks))
+
+    def _build_display() -> Group:
+        """Build a Rich renderable: log panel on top, progress bar below."""
+        if _LOG_LINES:
+            log_text = Text("\n".join(_LOG_LINES))
+        else:
+            log_text = Text("(waiting for output...)", style="dim")
+        log_panel = Panel(
+            log_text,
+            title="[bold]Log (last 20 lines)[/]",
+            border_style="dim",
+            height=22,
+        )
+        return Group(log_panel, progress)
+
     with ProcessPoolExecutor(max_workers=args.threads) as pool:
         futures = {
             pool.submit(
@@ -336,15 +370,7 @@ def main(argv: list[str] | None = None) -> None:
             for T, p in tasks
         }
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            bar = progress.add_task("Running tasks", total=len(tasks))
+        with Live(_build_display(), console=console, refresh_per_second=4) as live:
             for fut in as_completed(futures):
                 T_key, p_key = futures[fut]
                 try:
@@ -371,26 +397,24 @@ def main(argv: list[str] | None = None) -> None:
                             err,
                         )
                 progress.advance(bar)
+                live.update(_build_display())
 
     elapsed = time.perf_counter() - t0
 
-    # --- Summary table ---
+    # --- Summary ---
     n_ok = sum(1 for r in results if r[2] is not None)
     n_fail = len(results) - n_ok
 
-    summary = Table(title="Run Summary", show_header=True, header_style="bold")
-    summary.add_column("T", style="cyan", justify="right")
-    summary.add_column("param", style="cyan", justify="right")
-    summary.add_column("status", justify="center")
-    summary.add_column("path / error")
+    if n_fail:
+        fail_table = Table(title="Failed Tasks", show_header=True, header_style="bold")
+        fail_table.add_column("T", style="cyan", justify="right")
+        fail_table.add_column("param", style="cyan", justify="right")
+        fail_table.add_column("error")
+        for T_r, p_r, _, err_r in sorted(results, key=lambda r: (r[0], r[1])):
+            if err_r is not None:
+                fail_table.add_row(f"{T_r:.4f}", f"{p_r:.4f}", err_r)
+        console.print(fail_table)
 
-    for T_r, p_r, path_r, err_r in sorted(results, key=lambda r: (r[0], r[1])):
-        if path_r is not None:
-            summary.add_row(f"{T_r:.4f}", f"{p_r:.4f}", "[green]OK[/]", path_r)
-        else:
-            summary.add_row(f"{T_r:.4f}", f"{p_r:.4f}", "[red]FAIL[/]", err_r or "")
-
-    console.print(summary)
     console.print(
         f"\n[bold]Done[/] in {elapsed:.1f}s — "
         f"[green]{n_ok} OK[/] / [red]{n_fail} FAILED[/] of {len(tasks)} tasks"
