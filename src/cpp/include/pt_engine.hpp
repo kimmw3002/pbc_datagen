@@ -314,46 +314,46 @@ PT2DResult pt_rounds_2d(
             replicas[r]->sweep(1);
         }
 
-        // T-direction exchanges (within each param column)
-        for (int j = 0; j < n_P; ++j) {
-            for (int i = 0; i < n_T - 1; ++i) {
-                int edge = j * (n_T - 1) + i;
-                int s_lo = i * n_P + j;
-                int s_hi = (i + 1) * n_P + j;
-                int r_lo = s2r[s_lo];
-                int r_hi = s2r[s_hi];
-                double E_lo = replicas[r_lo]->energy();
-                double E_hi = replicas[r_hi]->energy();
-                ++t_attempts[edge];
-                if (pt_exchange(E_lo, E_hi, temps[i], temps[i + 1], rng)) {
-                    r2s[r_lo] = s_hi;
-                    r2s[r_hi] = s_lo;
-                    s2r[s_lo] = r_hi;
-                    s2r[s_hi] = r_lo;
-                    ++t_accepts[edge];
-                }
+        // T-direction exchanges: M random proposals
+        for (int proposal = 0; proposal < M; ++proposal) {
+            int j = static_cast<int>(rng.rand_below(static_cast<uint64_t>(n_P)));
+            int i = static_cast<int>(rng.rand_below(static_cast<uint64_t>(n_T - 1)));
+            int edge = j * (n_T - 1) + i;
+            int s_lo = i * n_P + j;
+            int s_hi = (i + 1) * n_P + j;
+            int r_lo = s2r[s_lo];
+            int r_hi = s2r[s_hi];
+            double E_lo = replicas[r_lo]->energy();
+            double E_hi = replicas[r_hi]->energy();
+            ++t_attempts[edge];
+            if (pt_exchange(E_lo, E_hi, temps[i], temps[i + 1], rng)) {
+                r2s[r_lo] = s_hi;
+                r2s[r_hi] = s_lo;
+                s2r[s_lo] = r_hi;
+                s2r[s_hi] = r_lo;
+                ++t_accepts[edge];
             }
         }
 
-        // Param-direction exchanges (within each T row)
-        for (int i = 0; i < n_T; ++i) {
-            for (int j = 0; j < n_P - 1; ++j) {
-                int edge = i * (n_P - 1) + j;
-                int s_lo = i * n_P + j;
-                int s_hi = i * n_P + j + 1;
-                int r_lo = s2r[s_lo];
-                int r_hi = s2r[s_hi];
-                double dEdp_lo = replicas[r_lo]->dE_dparam();
-                double dEdp_hi = replicas[r_hi]->dE_dparam();
-                ++p_attempts[edge];
-                if (pt_exchange_param(dEdp_lo, dEdp_hi, temps[i],
-                                      params[j], params[j + 1], rng)) {
-                    r2s[r_lo] = s_hi;
-                    r2s[r_hi] = s_lo;
-                    s2r[s_lo] = r_hi;
-                    s2r[s_hi] = r_lo;
-                    ++p_accepts[edge];
-                }
+        // Param-direction exchanges: M random proposals
+        for (int proposal = 0; proposal < M; ++proposal) {
+            int i = static_cast<int>(rng.rand_below(static_cast<uint64_t>(n_T)));
+            int j = static_cast<int>(rng.rand_below(static_cast<uint64_t>(n_P - 1)));
+            int edge = i * (n_P - 1) + j;
+            int s_lo = i * n_P + j;
+            int s_hi = i * n_P + j + 1;
+            int r_lo = s2r[s_lo];
+            int r_hi = s2r[s_hi];
+            double dEdp_lo = replicas[r_lo]->dE_dparam();
+            double dEdp_hi = replicas[r_hi]->dE_dparam();
+            ++p_attempts[edge];
+            if (pt_exchange_param(dEdp_lo, dEdp_hi, temps[i],
+                                  params[j], params[j + 1], rng)) {
+                r2s[r_lo] = s_hi;
+                r2s[r_hi] = s_lo;
+                s2r[s_lo] = r_hi;
+                s2r[s_hi] = r_lo;
+                ++p_accepts[edge];
             }
         }
 
