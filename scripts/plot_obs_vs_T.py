@@ -154,8 +154,6 @@ def main() -> None:
     param_vals: list[float] = []
     model_type: object = ""
     L: object = 0
-    # For 2D heatmaps from HDF5
-    slots_for_heatmap: list[tuple[float, ...]] | None = None
 
     if is_pt:
         (model_type, L, is_2d, param_label, obs_names, _temps, _d1, _d2, _pv) = load_pt_obs(
@@ -221,7 +219,6 @@ def main() -> None:
                                 means.append(np.mean(vals))
                                 stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
                             data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
-                    slots_for_heatmap = [(t, pv, i) for t, pv, i in slots]
                 else:
                     param_value = f.attrs.get("param_value", 0.0)
                     t_slots = []
@@ -272,7 +269,6 @@ def main() -> None:
                                 means.append(np.mean(vals))
                                 stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
                             data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
-                    slots_for_heatmap = [(t, pv, gn) for t, pv, gn in slots_old]
                 else:
                     param_value = f.attrs["param_value"]
                     t_groups = sorted(
@@ -346,51 +342,60 @@ def main() -> None:
     print(f"Saved → {out_path}")
 
     # --- 2D heatmap (separate PNG per observable) ---
-    if is_2d:
-        if is_pt:
-            # For .pt, derive T values from data_2d
-            first_obs_data = data_2d[obs_names[0]]
-            all_ts: set[float] = set()
+    if is_2d and data_2d:
+        from scipy.interpolate import griddata
+
+        for obs in obs_names:
+            # Collect raw scatter points from data_2d — no assumptions about T spacing
+            T_pts: list[float] = []
+            P_pts: list[float] = []
+            V_pts: list[float] = []
             for pv in param_vals:
-                all_ts.update(first_obs_data[pv][0].tolist())
-            t_vals = sorted(all_ts)
-        elif slots_for_heatmap is not None:
-            t_vals = sorted(set(s[0] for s in slots_for_heatmap))
-        else:
-            t_vals = []
+                ts_arr, mean_arr, _ = data_2d[obs][pv]
+                for t, v in zip(ts_arr.tolist(), mean_arr.tolist()):
+                    T_pts.append(t)
+                    P_pts.append(pv)
+                    V_pts.append(v)
 
-        if t_vals:
-            for obs in obs_names:
-                grid = np.zeros((len(param_vals), len(t_vals)))
-                for pi, pv in enumerate(param_vals):
-                    ts_arr, mean, _ = data_2d[obs][pv]
-                    for ti, t in enumerate(t_vals):
-                        ix = int(np.argmin(np.abs(ts_arr - t)))
-                        grid[pi, ti] = mean[ix]
+            T_arr = np.array(T_pts)
+            P_arr = np.array(P_pts)
+            V_arr = np.array(V_pts)
 
-                fig_h, ax_h = plt.subplots(figsize=(8, 6))
-                abs_obs = ("abs_m", "q", "abs_m_sigma", "abs_m_tau", "abs_m_baxter")
-                vmin: float | None = 0 if obs in abs_obs else None
-                vmax: float | None = 1 if obs in abs_obs else None
-                im = ax_h.imshow(
-                    grid,
-                    aspect="auto",
-                    origin="lower",
-                    extent=(t_vals[0], t_vals[-1], param_vals[0], param_vals[-1]),
-                    cmap="RdBu_r",
-                    vmin=vmin,
-                    vmax=vmax,
-                )
-                ax_h.set_xlabel("T")
-                ax_h.set_ylabel(param_label or "")
-                ax_h.set_title(f"⟨{obs}⟩  —  {model_type} L={L}")
-                fig_h.colorbar(im, ax=ax_h, label=f"⟨{obs}⟩")
-                fig_h.tight_layout()
+            # Uniform target grid → imshow extent is correct by construction
+            T_fine = np.linspace(T_arr.min(), T_arr.max(), 400)
+            P_fine = np.linspace(P_arr.min(), P_arr.max(), 200)
+            T_grid, P_grid = np.meshgrid(T_fine, P_fine)
+            grid_vals = griddata(
+                np.column_stack([T_arr, P_arr]),
+                V_arr,
+                (T_grid, P_grid),
+                method="linear",
+                fill_value=np.nan,
+            )
 
-                hm_path = out_path.parent / f"{input_path.stem}_heatmap_{obs}.png"
-                fig_h.savefig(hm_path, dpi=150, bbox_inches="tight")
-                print(f"Saved → {hm_path}")
-                plt.close(fig_h)
+            fig_h, ax_h = plt.subplots(figsize=(8, 6))
+            abs_obs = ("abs_m", "q", "abs_m_sigma", "abs_m_tau", "abs_m_baxter")
+            vmin: float | None = 0 if obs in abs_obs else None
+            vmax: float | None = 1 if obs in abs_obs else None
+            im = ax_h.imshow(
+                grid_vals,
+                aspect="auto",
+                origin="lower",
+                extent=(T_fine[0], T_fine[-1], P_fine[0], P_fine[-1]),
+                cmap="RdBu_r",
+                vmin=vmin,
+                vmax=vmax,
+            )
+            ax_h.set_xlabel("T")
+            ax_h.set_ylabel(param_label or "")
+            ax_h.set_title(f"⟨{obs}⟩  —  {model_type} L={L}")
+            fig_h.colorbar(im, ax=ax_h, label=f"⟨{obs}⟩")
+            fig_h.tight_layout()
+
+            hm_path = out_path.parent / f"{input_path.stem}_heatmap_{obs}.png"
+            fig_h.savefig(hm_path, dpi=150, bbox_inches="tight")
+            print(f"Saved → {hm_path}")
+            plt.close(fig_h)
 
     if not args.no_show:
         plt.show()
