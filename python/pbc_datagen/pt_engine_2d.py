@@ -440,10 +440,16 @@ class PTEngine2D:
         L = self.L
         C = 2 if self.model_type == "ashkin_teller" else 1
         obs_names = list(self.replicas[0].observables().keys())
-        thinning = max(1, math.ceil(3 * self.tau_max))
+        thinning_base = max(2, math.ceil(3 * self.tau_max))
+        thin_rng = np.random.default_rng(self.seed)
         pl = self.param_label
 
-        logger.info("Phase C: producing snapshots (target={}, thinning={})", n_snapshots, thinning)
+        logger.info(
+            "Phase C: producing snapshots (target={}, thinning~[{}, {}))",
+            n_snapshots,
+            thinning_base,
+            2 * thinning_base,
+        )
 
         # Phase-crossing tracker: per-replica last-Q and crossing count (BC only)
         track_crossings = self.model_type == "blume_capel"
@@ -487,8 +493,10 @@ class PTEngine2D:
                 logger.info("Phase C: resuming from {}/{}", n_existing, n_snapshots)
 
             for snap_i in range(n_remaining):
-                # Thinning rounds
-                self._run_pt(self.replicas, self.r2s, self.s2r, thinning, self.rng, False)
+                # Thinning rounds — randomize to break aliasing with
+                # period-2 magnetization oscillation (see LESSONS.md)
+                actual_thin = int(thin_rng.integers(thinning_base, 2 * thinning_base))
+                self._run_pt(self.replicas, self.r2s, self.s2r, actual_thin, self.rng, False)
 
                 # Batch-collect one snapshot from every slot
                 all_spins = np.empty((self.M, C, L, L), dtype=np.int8)

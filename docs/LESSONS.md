@@ -9,6 +9,13 @@ Hard-won insights from building this codebase. Read this before writing new code
   ~100% acceptance it degenerates into deterministic oscillation (all+1 → all-1 → ...).
   Always pick N random sites per sweep.
 
+- **Thinning interval must be randomized, not fixed.** At low T the Wolff algorithm
+  flips the entire lattice every sweep, creating period-2 magnetization oscillation.
+  If thinning = ceil(3 × τ_int) happens to be even, it aliases perfectly with this
+  period and every snapshot samples the same m sign. Fix: draw thinning uniformly from
+  [N_thin, 2×N_thin) per snapshot. Same principle as randomizing Metropolis site
+  selection (see first bullet).
+
 - **Both Wolff and Metropolis independently satisfy detailed balance** for the Ising model.
   Either alone is a valid sampler. The hybrid (Wolff + Metropolis) is used because Wolff
   kills critical slowing down while Metropolis handles local decorrelation.

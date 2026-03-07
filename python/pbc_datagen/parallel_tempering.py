@@ -642,13 +642,15 @@ class PTEngine:
         C = 2 if self.model_type == "ashkin_teller" else 1
         obs_names = list(self.replicas[0].observables().keys())
 
-        # Thinning: at least 1 round between snapshots
-        thinning = max(1, math.ceil(3 * self.tau_max))
+        # Thinning: at least 2 rounds between snapshots
+        thinning_base = max(2, math.ceil(3 * self.tau_max))
+        thin_rng = np.random.default_rng(self.seed)
 
         logger.info(
-            "Phase C: producing snapshots (target={}, thinning={} rounds)",
+            "Phase C: producing snapshots (target={}, thinning~[{}, {}) rounds)",
             n_snapshots,
-            thinning,
+            thinning_base,
+            2 * thinning_base,
         )
 
         slot_keys = [_t_group_name(T) for T in self.temps]
@@ -692,14 +694,16 @@ class PTEngine:
                 for r in range(M):
                     self.replicas[r].set_temperature(self.temps[self.r2t[r]])
 
-                # Run thinning rounds (sweep + exchange, no obs tracking)
+                # Run thinning rounds — randomize to break aliasing with
+                # period-2 magnetization oscillation (see LESSONS.md)
+                actual_thin = int(thin_rng.integers(thinning_base, 2 * thinning_base))
                 result: _core.PTResult = self._pt_rounds(  # type: ignore[operator]
                     self.replicas,
                     self.temps.tolist(),
                     self.r2t,
                     self.t2r,
                     self.labels,
-                    thinning,
+                    actual_thin,
                     self.rng,
                     False,
                 )

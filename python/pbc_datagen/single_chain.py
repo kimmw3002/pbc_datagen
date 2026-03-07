@@ -172,12 +172,14 @@ class SingleChainEngine:
         L = self.L
         C = 2 if self.model_type == "ashkin_teller" else 1
         obs_names = list(self.model.observables().keys())
-        thinning = max(1, math.ceil(3 * self.tau_max))
+        thinning_base = max(2, math.ceil(3 * self.tau_max))
+        thin_rng = np.random.default_rng(self.seed)
 
         logger.info(
-            "Producing snapshots (target={}, thinning={} sweeps)",
+            "Producing snapshots (target={}, thinning~[{}, {}) sweeps)",
             n_snapshots,
-            thinning,
+            thinning_base,
+            2 * thinning_base,
         )
 
         slot_keys = [_t_group_name(self.T)]
@@ -218,8 +220,10 @@ class SingleChainEngine:
 
             # Main production loop
             for snap_i in range(n_remaining):
-                # Decorrelation sweeps (discard the observable time series)
-                self.model.sweep(thinning)
+                # Decorrelation sweeps — randomize to break aliasing with
+                # period-2 magnetization oscillation (see LESSONS.md)
+                actual_thin = int(thin_rng.integers(thinning_base, 2 * thinning_base))
+                self.model.sweep(actual_thin)
 
                 # Harvest snapshot — M=1 batch
                 if self.model_type == "ashkin_teller":
