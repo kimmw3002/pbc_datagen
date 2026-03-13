@@ -128,6 +128,13 @@ struct BlumeCapelModel {
     // After each iteration, records (E, m, |m|, Q) into the returned arrays.
     // Requires set_temperature() to have been called (T_ > 0).
     SweepResult sweep(int n_sweeps);
+
+    // Return a (1, L, L) snapshot of the spin array as a contiguous copy.
+    std::vector<int8_t> snapshot() const;
+
+    // Randomize all spins to uniformly random values from {-1, 0, +1}.
+    // Updates cached observables.  Uses the model's internal RNG.
+    void randomize();
 };
 
 }  // namespace pbc

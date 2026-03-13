@@ -88,6 +88,14 @@ struct IsingModel {
     // After each iteration, records (E, m, |m|) into the returned arrays.
     // Requires set_temperature() to have been called (T_ > 0).
     SweepResult sweep(int n_sweeps);
+
+    // Return a (1, L, L) snapshot of the spin array as a contiguous copy.
+    // Channel 0 = spin.  Used by the model-agnostic Python pipeline.
+    std::vector<int8_t> snapshot() const;
+
+    // Randomize all spins to uniformly random ±1 values.
+    // Updates cached observables.  Uses the model's internal RNG.
+    void randomize();
 };
 
 }  // namespace pbc

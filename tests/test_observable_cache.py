@@ -443,3 +443,62 @@ def test_at_remapped_observables_after_set_spin() -> None:
         site = int(rng.integers(0, N))
         model.set_tau(site, int(rng.choice([-1, 1])))
         _assert_at_observables(model, nbr, N, U)
+
+
+# ---------------------------------------------------------------------------
+# Observable cache after randomize()
+#
+# randomize() resets all spins AND recomputes cached observables from scratch.
+# These tests verify the recomputed caches match a Python O(N) calculation.
+# ---------------------------------------------------------------------------
+
+
+def test_ising_observables_after_randomize() -> None:
+    """After randomize(), cached E/m/|m| must match Python recomputation."""
+    from pbc_datagen._core import IsingModel, make_neighbor_table
+
+    L, N = 8, 64
+    model = IsingModel(L=L, seed=42)
+    model.set_temperature(2.269)
+    nbr = make_neighbor_table(L)
+
+    for _ in range(10):
+        model.randomize()
+        spins = model.spins.ravel()
+
+        e_py = _ising_energy_python(spins, nbr, N)
+        m_py, abs_m_py = _magnetization_python(spins, N)
+
+        assert model.energy() == e_py
+        assert model.magnetization() == pytest.approx(m_py, abs=1e-14)
+        assert model.abs_magnetization() == pytest.approx(abs_m_py, abs=1e-14)
+
+
+def test_bc_observables_after_randomize() -> None:
+    """After randomize(), cached E/m/|m|/Q must match Python recomputation."""
+    from pbc_datagen._core import BlumeCapelModel, make_neighbor_table
+
+    L, N, D = 8, 64, 1.5
+    model = BlumeCapelModel(L=L, seed=42)
+    model.set_temperature(2.0)
+    model.set_crystal_field(D)
+    nbr = make_neighbor_table(L)
+
+    for _ in range(10):
+        model.randomize()
+        _assert_bc_observables(model, nbr, N, D)
+
+
+def test_at_observables_after_randomize() -> None:
+    """After randomize(), cached 7 observables must match Python recomputation."""
+    from pbc_datagen._core import AshkinTellerModel, make_neighbor_table
+
+    L, N, U = 8, 64, 0.7
+    model = AshkinTellerModel(L=L, seed=42)
+    model.set_temperature(3.0)
+    model.set_four_spin_coupling(U)
+    nbr = make_neighbor_table(L)
+
+    for _ in range(10):
+        model.randomize()
+        _assert_at_observables(model, nbr, N, U)

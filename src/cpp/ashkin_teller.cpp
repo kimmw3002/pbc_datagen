@@ -450,4 +450,42 @@ AshkinTellerModel::ObsVec AshkinTellerModel::observables() const {
     };
 }
 
+std::vector<int8_t> AshkinTellerModel::snapshot() const {
+    // Return (2, L, L): [σ_0..σ_{N-1}, τ_0..τ_{N-1}] contiguous.
+    std::vector<int8_t> buf(static_cast<size_t>(2 * N));
+    std::copy(sigma.begin(), sigma.end(), buf.begin());
+    std::copy(tau.begin(), tau.end(), buf.begin() + N);
+    return buf;
+}
+
+void AshkinTellerModel::randomize() {
+    cached_sigma_sum_ = 0;
+    cached_tau_sum_ = 0;
+    cached_baxter_sum_ = 0;
+    for (int i = 0; i < N; ++i) {
+        auto idx = static_cast<size_t>(i);
+        sigma[idx] = (rng.rand_below(2) == 0) ? int8_t{1} : int8_t{-1};
+        tau[idx]   = (rng.rand_below(2) == 0) ? int8_t{1} : int8_t{-1};
+        cached_sigma_sum_ += sigma[idx];
+        cached_tau_sum_ += tau[idx];
+        cached_baxter_sum_ += sigma[idx] * tau[idx];
+    }
+
+    // Recompute coupling sums: south (d=1) and east (d=2) only.
+    cached_sigma_coupling_ = 0;
+    cached_tau_coupling_ = 0;
+    cached_four_spin_ = 0;
+    for (int i = 0; i < N; ++i) {
+        auto idx = static_cast<size_t>(i);
+        int si = sigma[idx], ti = tau[idx];
+        for (int d : {1, 2}) {
+            auto j = static_cast<size_t>(nbr[static_cast<size_t>(i * 4 + d)]);
+            int sj = sigma[j], tj = tau[j];
+            cached_sigma_coupling_ += si * sj;
+            cached_tau_coupling_ += ti * tj;
+            cached_four_spin_ += si * sj * ti * tj;
+        }
+    }
+}
+
 }  // namespace pbc

@@ -201,4 +201,32 @@ IsingModel::ObsVec IsingModel::observables() const {
     };
 }
 
+std::vector<int8_t> IsingModel::snapshot() const {
+    // Return a copy — length N = L*L, semantically (1, L, L).
+    return spin;
+}
+
+void IsingModel::randomize() {
+    // Reset cached observables — recompute after randomization.
+    cached_m_sum_ = 0;
+    for (int i = 0; i < N; ++i) {
+        spin[static_cast<size_t>(i)] = (rng.rand_below(2) == 0)
+                                           ? int8_t{1}
+                                           : int8_t{-1};
+        cached_m_sum_ += spin[static_cast<size_t>(i)];
+    }
+
+    // Recompute energy from scratch: H = -Σ_{<ij>} s_i s_j (each bond once).
+    int coupling = 0;
+    for (int i = 0; i < N; ++i) {
+        int si = spin[static_cast<size_t>(i)];
+        // Only count east (d=2) and south (d=1) to avoid double-counting.
+        int j_south = nbr[static_cast<size_t>(i * 4 + 1)];
+        int j_east  = nbr[static_cast<size_t>(i * 4 + 2)];
+        coupling += si * spin[static_cast<size_t>(j_south)];
+        coupling += si * spin[static_cast<size_t>(j_east)];
+    }
+    cached_energy_ = -coupling;
+}
+
 }  // namespace pbc

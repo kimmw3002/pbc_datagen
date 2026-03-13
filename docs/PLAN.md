@@ -120,13 +120,13 @@ Additive — zero breakage. Two new uniform interface methods on every model.
 
 `randomize(Rng&)` randomizes all spins using model-appropriate logic. Eliminates Python-side `_randomize_all()` if-else.
 
-- [ ] Step 5.0.1: `ising.hpp` + `ising.cpp` — `snapshot()` returns spins copy; `randomize()` sets each spin ±1
-- [ ] Step 5.0.2: `bindings.cpp` — bind `IsingModel.snapshot()` → `py::array_t<int8_t>` shape `(1, L, L)`; bind `randomize()`
-- [ ] Step 5.0.3: Same for `BlumeCapelModel` — `snapshot()` → `(1, L, L)` int8; `randomize()` draws from {−1, 0, +1}
-- [ ] Step 5.0.4: Same for `AshkinTellerModel` — `snapshot()` → `(2, L, L)` int8 (stacks σ+τ in C++); `randomize()` both layers ±1
-- [ ] Step 5.0.5: `_core.pyi` — add `snapshot()` and `randomize()` stubs to all 3 classes
-- [ ] Step 5.0.6: Test: `tests/test_snapshot_method.py` — shape, dtype, value-match for `snapshot()`; `randomize()` produces non-constant configs
-- [ ] Step 5.0.7: Rebuild + full test suite (331 existing tests unaffected)
+- [x] Step 5.0.1: `ising.hpp` + `ising.cpp` — `snapshot()` returns spins copy; `randomize()` sets each spin ±1
+- [x] Step 5.0.2: `bindings.cpp` — bind `IsingModel.snapshot()` → `py::array_t<int8_t>` shape `(1, L, L)`; bind `randomize()`
+- [x] Step 5.0.3: Same for `BlumeCapelModel` — `snapshot()` → `(1, L, L)` int8; `randomize()` draws from {−1, 0, +1}
+- [x] Step 5.0.4: Same for `AshkinTellerModel` — `snapshot()` → `(2, L, L)` int8 (stacks σ+τ in C++); `randomize()` both layers ±1
+- [x] Step 5.0.5: `_core.pyi` — add `snapshot()` and `randomize()` stubs to all 3 classes
+- [x] Step 5.0.6: Test: `tests/test_snapshot_method.py` — shape, dtype, value-match for `snapshot()`; `randomize()` produces non-constant configs; observable cache correctness after `randomize()` (3 tests in `test_observable_cache.py`)
+- [x] Step 5.0.7: Rebuild + full test suite (334 tests pass, 9 deselected)
 
 ### 5.1 — Model Registry
 

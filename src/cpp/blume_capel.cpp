@@ -225,4 +225,32 @@ BlumeCapelModel::ObsVec BlumeCapelModel::observables() const {
     };
 }
 
+std::vector<int8_t> BlumeCapelModel::snapshot() const {
+    return spin;
+}
+
+void BlumeCapelModel::randomize() {
+    // Each spin drawn uniformly from {-1, 0, +1}.
+    cached_m_sum_ = 0;
+    cached_sq_sum_ = 0;
+    for (int i = 0; i < N; ++i) {
+        int r = static_cast<int>(rng.rand_below(3));  // 0, 1, 2
+        int8_t val = static_cast<int8_t>(r - 1);      // -1, 0, +1
+        spin[static_cast<size_t>(i)] = val;
+        cached_m_sum_ += val;
+        cached_sq_sum_ += val * val;
+    }
+
+    // Recompute energy: H = -Σ_{<ij>} s_i s_j + D Σ s_i²
+    int coupling = 0;
+    for (int i = 0; i < N; ++i) {
+        int si = spin[static_cast<size_t>(i)];
+        int j_south = nbr[static_cast<size_t>(i * 4 + 1)];
+        int j_east  = nbr[static_cast<size_t>(i * 4 + 2)];
+        coupling += si * spin[static_cast<size_t>(j_south)];
+        coupling += si * spin[static_cast<size_t>(j_east)];
+    }
+    cached_energy_ = -static_cast<double>(coupling) + D_ * cached_sq_sum_;
+}
+
 }  // namespace pbc

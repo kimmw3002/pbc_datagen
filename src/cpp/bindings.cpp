@@ -73,6 +73,14 @@ PYBIND11_MODULE(_core, m) {
                 out[py::cast(name)] = val;
             return out;
         })
+        .def("snapshot", [](const pbc::IsingModel& self) {
+            auto buf = self.snapshot();
+            // Return (1, L, L) int8 — owning copy.
+            py::array_t<int8_t> arr({1, self.L, self.L});
+            std::copy(buf.begin(), buf.end(), arr.mutable_data());
+            return arr;
+        })
+        .def("randomize", &pbc::IsingModel::randomize)
         .def("sweep", [](pbc::IsingModel& self, int n_sweeps) {
             auto result = self.sweep(n_sweeps);
             auto n = static_cast<py::ssize_t>(n_sweeps);
@@ -124,6 +132,13 @@ PYBIND11_MODULE(_core, m) {
                 out[py::cast(name)] = val;
             return out;
         })
+        .def("snapshot", [](const pbc::BlumeCapelModel& self) {
+            auto buf = self.snapshot();
+            py::array_t<int8_t> arr({1, self.L, self.L});
+            std::copy(buf.begin(), buf.end(), arr.mutable_data());
+            return arr;
+        })
+        .def("randomize", &pbc::BlumeCapelModel::randomize)
         .def("sweep", [](pbc::BlumeCapelModel& self, int n_sweeps) {
             auto result = self.sweep(n_sweeps);
             auto n = static_cast<py::ssize_t>(n_sweeps);
@@ -193,6 +208,14 @@ PYBIND11_MODULE(_core, m) {
                 out[py::cast(name)] = val;
             return out;
         })
+        .def("snapshot", [](const pbc::AshkinTellerModel& self) {
+            auto buf = self.snapshot();
+            // Return (2, L, L) int8: channel 0 = σ, channel 1 = τ.
+            py::array_t<int8_t> arr({2, self.L, self.L});
+            std::copy(buf.begin(), buf.end(), arr.mutable_data());
+            return arr;
+        })
+        .def("randomize", &pbc::AshkinTellerModel::randomize)
         .def("sweep", [](pbc::AshkinTellerModel& self, int n_sweeps) {
             auto result = self.sweep(n_sweeps);
             auto n = static_cast<py::ssize_t>(n_sweeps);

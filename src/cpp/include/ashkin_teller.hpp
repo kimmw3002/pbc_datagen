@@ -150,6 +150,14 @@ struct AshkinTellerModel {
     // After each iteration, records all 7 observables into the returned arrays.
     // Requires set_temperature() to have been called (T_ > 0).
     SweepResult sweep(int n_sweeps);
+
+    // Return a (2, L, L) snapshot: channel 0 = σ, channel 1 = τ.
+    // Contiguous copy in row-major order: [σ_0..σ_{N-1}, τ_0..τ_{N-1}].
+    std::vector<int8_t> snapshot() const;
+
+    // Randomize both σ and τ layers to uniformly random ±1 values.
+    // Updates cached observables.  Uses the model's internal RNG.
+    void randomize();
 };
 
 }  // namespace pbc
