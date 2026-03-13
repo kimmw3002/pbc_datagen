@@ -73,22 +73,29 @@ class SnapshotWriter:
         C: int,
         L: int,
         obs_names: list[str],
+        snapshot_dtype: np.dtype[Any] = np.dtype(np.int8),
     ) -> None:
         """Fresh run: pre-allocate flat datasets.
 
         Creates root-level datasets and stores slot_keys / obs_names
         as JSON attributes for later discovery.
+
+        Args:
+            snapshot_dtype: Numpy dtype for the snapshot dataset.
+                Stored as an HDF5 attribute so readers can reconstruct
+                the correct dtype (e.g. ``"int8"``, ``"float64"``).
         """
         M = len(slot_keys)
         self._file.attrs["slot_keys"] = json.dumps(slot_keys)
         self._file.attrs["obs_names"] = json.dumps(obs_names)
         self._file.attrs["count"] = 0
+        self._file.attrs["snapshot_dtype"] = snapshot_dtype.name
 
         self._snap_ds = self._file.create_dataset(
             "snapshots",
             shape=(M, n_snapshots, C, L, L),
             maxshape=(M, None, C, L, L),
-            dtype=np.int8,
+            dtype=snapshot_dtype,
             chunks=(1, 1, C, L, L),
         )
         for name in obs_names:
@@ -120,7 +127,7 @@ class SnapshotWriter:
 
     def write_round(
         self,
-        all_spins: npt.NDArray[np.int8],
+        all_spins: npt.NDArray[Any],
         obs_arrays: dict[str, npt.NDArray[np.float64]],
     ) -> None:
         """Batch-write one round.

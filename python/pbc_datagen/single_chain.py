@@ -185,7 +185,7 @@ class SingleChainEngine:
         with SnapshotWriter(path) as writer:
             # Create flat datasets or open existing ones for resume
             if "snapshots" not in writer._file:
-                writer.create_datasets(slot_keys, n_snapshots, C, L, obs_names)
+                writer.create_datasets(slot_keys, n_snapshots, C, L, obs_names, info.snapshot_dtype)
             else:
                 writer.open_datasets()
 

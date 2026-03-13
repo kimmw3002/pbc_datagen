@@ -68,9 +68,32 @@ class TestSnapshotWriterCreation:
             assert f["snapshots"].shape == (M, n_snap, C, L, L)
             assert f["snapshots"].dtype == np.int8
             assert f["snapshots"].maxshape[1] is None  # resizable along axis 1
+            assert str(f.attrs["snapshot_dtype"]) == "int8"
             for name in obs_names:
                 assert f[name].shape == (M, n_snap)
                 assert f[name].dtype == np.float64
+
+    def test_create_datasets_float64(self, tmp_path: Path) -> None:
+        """float64 dtype round-trips through create_datasets + write_round."""
+        from pbc_datagen.io import SnapshotWriter
+
+        path = tmp_path / "test.h5"
+        L, C, M = 4, 1, 2
+        obs_names = _ising_obs_names()
+        slot_keys = ["T=2.0000", "T=2.5000"]
+
+        rng = np.random.default_rng(7)
+        spins = rng.uniform(0.0, 2 * np.pi, size=(M, C, L, L)).astype(np.float64)
+
+        with SnapshotWriter(path) as w:
+            w.create_datasets(slot_keys, 10, C, L, obs_names, snapshot_dtype=np.dtype(np.float64))
+            obs = {name: np.zeros(M) for name in obs_names}
+            w.write_round(spins, obs)
+
+        with h5py.File(path, "r") as f:
+            assert f["snapshots"].dtype == np.float64
+            assert str(f.attrs["snapshot_dtype"]) == "float64"
+            np.testing.assert_allclose(f["snapshots"][:, 0], spins)
 
 
 # ---------------------------------------------------------------------------

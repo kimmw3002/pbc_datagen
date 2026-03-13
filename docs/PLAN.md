@@ -150,10 +150,10 @@ class ModelInfo:
 
 ### 5.2 — Generalize I/O Dtype
 
-- [ ] Step 5.2.1: `io.py` — add `snapshot_dtype: np.dtype` param to `create_datasets()` (no default — caller must specify)
-- [ ] Step 5.2.2: `io.py` — widen `write_round()` annotation from `NDArray[np.int8]` to `NDArray[Any]`
-- [ ] Step 5.2.3: `io.py` — store `snapshot_dtype` as HDF5 attr (string: `"int8"`, `"float64"`) for readers
-- [ ] Step 5.2.4: Test: `tests/test_io.py` — add float64 round-trip test; update creation test for explicit dtype
+- [x] Step 5.2.1: `io.py` — add `snapshot_dtype: np.dtype` param to `create_datasets()` (no default — caller must specify)
+- [x] Step 5.2.2: `io.py` — widen `write_round()` annotation from `NDArray[np.int8]` to `NDArray[Any]`
+- [x] Step 5.2.3: `io.py` — store `snapshot_dtype` as HDF5 attr (string: `"int8"`, `"float64"`) for readers
+- [x] Step 5.2.4: Test: `tests/test_io.py` — add float64 round-trip test; update creation test for explicit dtype
 
 ### 5.3 — Rewire Engines to Registry + `snapshot()` + `randomize()`
 
