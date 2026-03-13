@@ -21,11 +21,13 @@ from pathlib import Path
 import h5py
 import numpy as np
 import torch
+from pbc_datagen.registry import get_model_info
 
-# Model → Hamiltonian parameter label
-_PARAM_LABELS: dict[str, str] = {
-    "blume_capel": "D",
-    "ashkin_teller": "U",
+# Numpy dtype name → torch dtype
+_TORCH_DTYPES: dict[str, torch.dtype] = {
+    "int8": torch.int8,
+    "float32": torch.float32,
+    "float64": torch.float64,
 }
 
 
@@ -51,13 +53,18 @@ def _read_flat_schema(f: h5py.File, model_type: str) -> list[dict[str, object]]:
     obs_names: list[str] = json.loads(str(f.attrs["obs_names"]))
     M = len(slot_keys)
 
+    # Determine torch dtype from HDF5 attr (fallback "int8" for pre-migration files)
+    dtype_name = str(f.attrs.get("snapshot_dtype", "int8"))
+    torch_dtype = _TORCH_DTYPES.get(dtype_name, torch.int8)
+
     snapshots = f["snapshots"][:, :count]  # (M, count, C, L, L)
     obs_data: dict[str, np.ndarray] = {}
     for name in obs_names:
         obs_data[name] = f[name][:, :count]  # (M, count)
 
     is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
-    param_label = _PARAM_LABELS.get(model_type)
+    info = get_model_info(model_type)
+    param_label = info.param_label
 
     param_value: float | None = None
     if not is_2d and param_label is not None:
@@ -69,7 +76,7 @@ def _read_flat_schema(f: h5py.File, model_type: str) -> list[dict[str, object]]:
 
         for n in range(count):
             record: dict[str, object] = {
-                "state": torch.tensor(snapshots[s, n], dtype=torch.int8),
+                "state": torch.tensor(snapshots[s, n], dtype=torch_dtype),
                 "T": T_val,
             }
             for obs_name in obs_names:
@@ -159,7 +166,7 @@ def _default_output_file(input_path: Path) -> Path:
         model_type = str(f.attrs["model_type"])
         L = int(f.attrs["L"])
 
-    param_label = _PARAM_LABELS.get(model_type)
+    param_label = get_model_info(model_type).param_label
 
     # Collect all T and param values across files
     all_T: set[float] = set()

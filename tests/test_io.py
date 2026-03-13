@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import h5py
 import numpy as np
@@ -19,10 +20,10 @@ def _ising_obs_names() -> list[str]:
     return ["energy", "m", "abs_m"]
 
 
-def _random_spins(M: int, C: int, L: int) -> np.ndarray:
-    """Random ±1 spin array shaped (M, C, L, L), dtype int8."""
+def _random_spins(M: int, C: int, L: int, dtype: np.dtype[Any] = np.dtype(np.int8)) -> np.ndarray:
+    """Random ±1 spin array shaped (M, C, L, L)."""
     rng = np.random.default_rng(42)
-    return rng.choice([-1, 1], size=(M, C, L, L)).astype(np.int8)
+    return rng.choice([-1, 1], size=(M, C, L, L)).astype(dtype)
 
 
 # ---------------------------------------------------------------------------

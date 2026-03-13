@@ -137,9 +137,11 @@ class TestProduceHDF5Layout:
 
         engine.produce(path, n_snapshots=n_snapshots)
 
+        from pbc_datagen.registry import get_model_info
+
         with h5py.File(path, "r") as f:
             ds = f["snapshots"]
-            assert ds.dtype == np.int8
+            assert ds.dtype == get_model_info("ising").snapshot_dtype
             assert ds.shape == (M, n_snapshots, 1, L, L)
 
     def test_observable_datasets_match_model(self, tmp_path: Path) -> None:

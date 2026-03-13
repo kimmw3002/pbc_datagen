@@ -14,11 +14,12 @@ import time
 from pathlib import Path
 
 from loguru import logger
+from pbc_datagen.registry import get_model_info, valid_model_names
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-VALID_MODELS = ("ising", "blume_capel", "ashkin_teller")
+VALID_MODELS = valid_model_names()
 
 console = Console()
 
@@ -173,7 +174,7 @@ def main(argv: list[str] | None = None) -> None:
     logger.enable("pbc_datagen")
 
     # --- Summary panel ---
-    param_label: dict[str, str] = {"blume_capel": "D", "ashkin_teller": "U"}
+    pl = get_model_info(args.model).param_label
 
     table = Table(show_header=False, border_style="dim", pad_edge=False, box=None)
     table.add_column("key", style="bold", min_width=16)
@@ -182,13 +183,13 @@ def main(argv: list[str] | None = None) -> None:
     table.add_row("L", str(args.L))
     table.add_row("PT mode", "2D grid" if use_2d else "1D ladder")
     if use_2d:
-        pl = param_label[args.model]
+        assert pl is not None
         table.add_row(f"{pl} range", f"[{args.param_range[0]}, {args.param_range[1]}]")
         table.add_row("Grid", f"{args.n_T} T × {args.n_P} {pl}")
-    elif args.model in param_label:
+    elif pl is not None:
         assert args.params is not None
         params_str = ", ".join(f"{p:.4f}" for p in args.params)
-        table.add_row(f"{param_label[args.model]} values", params_str)
+        table.add_row(f"{pl} values", params_str)
         table.add_row("Replicas", str(args.n_replicas))
     else:
         table.add_row("J", "1 (fixed)")

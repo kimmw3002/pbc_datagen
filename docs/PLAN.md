@@ -183,13 +183,13 @@ Flat schema is the only format. Old per-group `.h5` files become unsupported.
 
 ### 5.5 — Fix Dtype in Scripts + Tests
 
-- [ ] Step 5.5.1: `scripts/convert_to_pt.py` — read `snapshot_dtype` attr; map to torch dtype dynamically (fallback `"int8"`)
-- [ ] Step 5.5.2: `tests/test_produce.py` — dtype assertion via registry instead of hardcoded `np.int8`
-- [ ] Step 5.5.3: `tests/test_e2e.py` — same
-- [ ] Step 5.5.4: `tests/test_single_chain.py` — same
-- [ ] Step 5.5.5: `tests/test_io.py` — `_random_spins` helper accepts dtype param
-- [ ] Step 5.5.6: CLI scripts (`generate_dataset.py`, `generate_single.py`, `generate_single_parallel.py`) — `VALID_MODELS` → `registry.valid_model_names()`
-- [ ] Step 5.5.7: Full verify: `mypy . && ruff check . && ruff format --check . && pytest`
+- [x] Step 5.5.1: `scripts/convert_to_pt.py` — read `snapshot_dtype` attr; map to torch dtype dynamically (fallback `"int8"`)
+- [x] Step 5.5.2: `tests/test_produce.py` — dtype assertion via registry instead of hardcoded `np.int8`
+- [x] Step 5.5.3: `tests/test_e2e.py` — same
+- [x] Step 5.5.4: `tests/test_single_chain.py` — same
+- [x] Step 5.5.5: `tests/test_io.py` — `_random_spins` helper accepts dtype param
+- [x] Step 5.5.6: CLI scripts (`generate_dataset.py`, `generate_single.py`, `generate_single_parallel.py`) — `VALID_MODELS` → `registry.valid_model_names()`
+- [x] Step 5.5.7: Full verify: `mypy . && ruff check . && ruff format --check . && pytest`
 
 ### 5.6 — Documentation
 

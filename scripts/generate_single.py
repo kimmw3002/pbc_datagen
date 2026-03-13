@@ -14,12 +14,13 @@ import time
 from pathlib import Path
 
 from loguru import logger
+from pbc_datagen.registry import valid_model_names
 from pbc_datagen.single_chain import run_single_campaign
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-VALID_MODELS = ("ising", "blume_capel", "ashkin_teller")
+VALID_MODELS = valid_model_names()
 
 console = Console()
 

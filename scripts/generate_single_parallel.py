@@ -22,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 from loguru import logger
+from pbc_datagen.registry import get_model_info, valid_model_names
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
@@ -36,7 +37,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-VALID_MODELS = ("ising", "blume_capel", "ashkin_teller")
+VALID_MODELS = valid_model_names()
 
 console = Console()
 
@@ -131,8 +132,7 @@ def _run_one(
     #   ising       →  {root}/ising/L{L}/
     #   blume_capel →  {root}/blume_capel/L{L}/D={p:.4f}/
     #   ashkin_teller → {root}/ashkin_teller/L{L}/U={p:.4f}/
-    _PARAM_LABEL = {"blume_capel": "D", "ashkin_teller": "U"}
-    label = _PARAM_LABEL.get(model)
+    label = get_model_info(model).param_label
     if label is not None:
         task_dir = os.path.join(output_dir, model, f"L{L}", f"{label}={param:.4f}")
     else:

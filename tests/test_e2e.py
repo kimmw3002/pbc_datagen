@@ -51,7 +51,9 @@ def _verify_flat_schema(
         snap = f["snapshots"]
         assert snap.shape[0] == expected_M
         assert snap.shape[2] == 2  # C=2 for AT
-        assert snap.dtype == np.int8
+        from pbc_datagen.registry import get_model_info
+
+        assert snap.dtype == get_model_info("ashkin_teller").snapshot_dtype
 
         for obs in obs_names:
             assert obs in f, f"missing observable dataset '{obs}'"

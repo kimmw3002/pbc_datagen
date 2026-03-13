@@ -106,9 +106,11 @@ class TestProduce:
             assert int(f.attrs["seed"]) == 42
             assert int(f.attrs["count"]) == 5
 
+            from pbc_datagen.registry import get_model_info
+
             # Flat snapshot dataset: (1, 5, 1, 4, 4) int8
             assert f["snapshots"].shape == (1, 5, 1, 4, 4)
-            assert f["snapshots"].dtype == np.int8
+            assert f["snapshots"].dtype == get_model_info("ising").snapshot_dtype
 
             # Observable datasets: shape (1, 5) each
             for obs_name in ("energy", "m", "abs_m"):
