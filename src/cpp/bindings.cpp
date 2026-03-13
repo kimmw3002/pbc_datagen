@@ -10,6 +10,7 @@
 #include "lattice.hpp"
 #include "prng.hpp"
 #include "pt_engine.hpp"
+#include "xy.hpp"
 
 namespace py = pybind11;
 
@@ -238,6 +239,36 @@ PYBIND11_MODULE(_core, m) {
             out["abs_m_baxter"] = std::move(abs_m_baxter);
             return out;
         }, py::arg("n_sweeps"));
+
+    // --- XY model -------------------------------------------------------------
+    py::class_<pbc::XYModel>(m, "XYModel")
+        .def(py::init<int, uint64_t>(), py::arg("L"), py::arg("seed"))
+        .def_readonly("L", &pbc::XYModel::L)
+        .def_property_readonly("T", [](const pbc::XYModel& self) {
+            return self.T_;
+        })
+        .def_property_readonly("spins", [](const pbc::XYModel& self) {
+            // Return a numpy view into the theta vector (no copy).
+            // Shape: (L, L), dtype: float64.
+            return py::array_t<double>(
+                {self.L, self.L},
+                {self.L * (int)sizeof(double), (int)sizeof(double)},
+                self.theta.data(),
+                py::cast(self)
+            );
+        })
+        .def("set_temperature", &pbc::XYModel::set_temperature, py::arg("T"))
+        .def("set_spin", &pbc::XYModel::set_spin, py::arg("site"), py::arg("angle"))
+        .def("energy", &pbc::XYModel::energy)
+        .def("mx", &pbc::XYModel::mx)
+        .def("my", &pbc::XYModel::my)
+        .def("abs_magnetization", &pbc::XYModel::abs_magnetization)
+        .def("observables", [](const pbc::XYModel& self) {
+            py::dict out;
+            for (auto& [name, val] : self.observables())
+                out[py::cast(name)] = val;
+            return out;
+        });
 
     // --- PT engine: non-templated functions --------------------------------
     m.def("pt_exchange", &pbc::pt_exchange,

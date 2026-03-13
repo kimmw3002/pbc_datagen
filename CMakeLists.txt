@@ -17,6 +17,7 @@ pybind11_add_module(_core
     src/cpp/ising.cpp
     src/cpp/blume_capel.cpp
     src/cpp/ashkin_teller.cpp
+    src/cpp/xy.cpp
     src/cpp/bindings.cpp
 )
 

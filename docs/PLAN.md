@@ -160,5 +160,54 @@ MODEL_REGISTRY["xy"] = ModelInfo(
 - [ ] Validate D_min < D_tcp constraint in orchestrator (3.8.3)
 - [ ] Manual validation: orchestrator dispatches correctly by model type (3.8.5)
 - [ ] Tests: HDF5 round-trip with 2D group keys, resume from 2D file (3.9.4)
-- [ ] 2D XY model (C++ O(2) Wolff cluster + float64 snapshots + registry entry)
 - [ ] Classical Heisenberg model (3-channel float64, O(3) Wolff cluster)
+
+---
+
+## Phase 6: 2D XY Model
+
+Continuous-spin O(2) model: H = −J Σ cos(θᵢ − θⱼ), θ ∈ [0, 2π).
+First continuous-spin model — float64 snapshots, O(2) Wolff cluster, BKT transition.
+
+### Phase 6.0: Foundation — XYModel struct + construction + observables
+
+- [x] Step 6.0.1: `src/cpp/include/xy.hpp` — XYModel struct with `std::vector<double> theta`, cached `mx_sum_`, `my_sum_`, `cached_energy_`. Constructor (cold start = all θ=0). `set_temperature()`, `set_spin(site, double angle)`.
+- [x] Step 6.0.2: `src/cpp/xy.cpp` — `energy()`, `magnetization()` → |m| = √(mx² + my²)/N, `observables()` returning energy, mx, my, abs_m.
+- [x] Step 6.0.3: `tests/xy/test_model.py` — Construction, energy for known configs (all-aligned = −2N, antiferro, etc.), magnetization.
+
+### Phase 6.1: Wolff Cluster — O(2) Reflection
+
+- [ ] Step 6.1.1: `xy.cpp` — `_wolff_step()`: random reflection axis φ, DFS cluster growth with p_add = 1 − exp(min(0, −2β(sᵢ·r̂)(sⱼ·r̂))), reflect cluster spins θ → 2φ − θ.
+- [ ] Step 6.1.2: `tests/xy/test_wolff.py` — Cluster size > 1 at low T, reflection preserves energy of bonds outside cluster, energy changes by correct amount.
+- [ ] Step 6.1.3: Detailed balance test — numerical quadrature of 2×2 Z(T), energy histogram chi-squared.
+
+### Phase 6.2: Metropolis Sweep
+
+- [ ] Step 6.2.1: `xy.cpp` — `_metropolis_sweep()`: N random-site proposals with uniform angular window [−Δ, Δ]. `_delta_energy(site, new_theta)`.
+- [ ] Step 6.2.2: `tests/xy/test_metropolis.py` — Acceptance rate sanity, ΔE formula correctness, detailed balance via energy histogram.
+
+### Phase 6.3: Combined Sweep + Observable Caching
+
+- [ ] Step 6.3.1: `xy.cpp` — `sweep(n_sweeps)` = Wolff + Metropolis.
+- [ ] Step 6.3.2: Observable cache consistency tests — set_spin updates cache correctly, sweep results match full recompute.
+- [ ] Step 6.3.3: `snapshot()` → `(1, L, L)` float64, `randomize()` → uniform θ ∈ [0, 2π).
+
+### Phase 6.4: Helicity Modulus (New Observable)
+
+- [ ] Step 6.4.1: `xy.cpp` — helicity modulus ingredients: `hel_e_x` = (1/N) Σ_x cos(Δθ), `hel_jx` = (1/N) Σ_x sin(Δθ). Python computes Υ = ⟨hel_e_x⟩ − β N ⟨hel_jx²⟩.
+- [ ] Step 6.4.2: Add helicity terms to `observables()` dict.
+- [ ] Step 6.4.3: Test: at T→0 (aligned), hel_e_x → 1. At T >> T_BKT, Υ → 0.
+
+### Phase 6.5: Bindings + Registry Integration
+
+- [ ] Step 6.5.1: `bindings.cpp` — bind XYModel, add `pt_rounds_xy` instantiation.
+- [ ] Step 6.5.2: `_core.pyi` — type stubs for XYModel.
+- [ ] Step 6.5.3: `registry.py` — add `"xy"` entry with `snapshot_dtype=np.float64`, `n_channels=1`, `param_label=None`.
+- [ ] Step 6.5.4: `tests/test_snapshot_method.py` — add XY snapshot shape/dtype checks.
+- [ ] Step 6.5.5: `tests/test_observable_cache.py` — add XY cache consistency checks.
+
+### Phase 6.6: Integration + E2E
+
+- [ ] Step 6.6.1: PT detailed balance test — numerical quadrature 2×2 reference for XY.
+- [ ] Step 6.6.2: E2E test — XY 1D PT pipeline.
+- [ ] Step 6.6.3: Update `docs/ARCHITECTURE.md`, `docs/PLAN.md`, `docs/LESSONS.md`.
