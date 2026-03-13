@@ -19,6 +19,9 @@ Paper-quality dataset generator for independent spatial snapshots of three 2D la
 │  │Autocorr τ│ │ Spectral   │ │ Convergence  │ │ HDF5 I/O │ │
 │  │FFT-based │ │ connectiv. │ │ Welch 2-init │ │SnapshotWr│ │
 │  └──────┬───┘ └─────┬─────┘ └──────┬────────┘ └────┬─────┘ │
+│         │     ┌──────┴─────────────┐│               │       │
+│         │     │ Registry (ModelInfo)││               │       │
+│         │     └──────┬─────────────┘│               │       │
 │         └──────┬─────┘──────────────┘───────────────┘       │
 │                │ pybind11                                     │
 ├────────────────┼────────────────────────────────────────────┤
@@ -29,9 +32,11 @@ Paper-quality dataset generator for independent spatial snapshots of three 2D la
 │  │  │ IsingModel │ │ BCModel  │ │  ATModel   │            │ │
 │  │  │ Wolff +    │ │ Geom.    │ │ Wiseman-   │            │ │
 │  │  │ Metropolis │ │ Cluster +│ │ Domany +   │            │ │
-│  │  │            │ │ Metropol.│ │ Metropolis │            │ │
-│  │  │            │ │+set_param│ │+set_param  │            │ │
+│  │  │+snapshot() │ │ Metropol.│ │ Metropolis │            │ │
+│  │  │+randomize()│ │+set_param│ │+set_param  │            │ │
 │  │  │            │ │+dE_dparam│ │+dE_dparam  │            │ │
+│  │  │            │ │+snapshot │ │+snapshot   │            │ │
+│  │  │            │ │+randomize│ │+randomize  │            │ │
 │  │  └────────────┘ └──────────┘ └────────────┘            │ │
 │  │  ┌────────────────────────────────────────────────┐    │ │
 │  │  │ PT Engine (header-only, templated)             │    │ │
@@ -52,6 +57,7 @@ Paper-quality dataset generator for independent spatial snapshots of three 2D la
 - **Precomputed neighbor table**: `make_neighbor_table(L)` stores 4 neighbors per site in a flat `vector<int32_t>` to avoid modular arithmetic in inner loops.
 - **PRNG**: Xoshiro256++ (Blackman & Vigna, 2018) vendored as header-only. `Rng` wrapper exposes `uniform()`, `rand_below()`, `jump()` for independent parallel streams.
 - **No abstraction over physics**: three bespoke model structs, each with its own `sweep()`.
+- **Uniform snapshot interface**: every model exposes `snapshot()` → `(C, L, L)` numpy array (owning copy, correct dtype) and `randomize(rng)` for model-appropriate random initialization. Eliminates Python-side if-else for spin collection and randomization.
 - **O(1) observable caching**: each model maintains cached sums (energy, magnetization, etc.) updated incrementally by `set_spin()`, Metropolis, and Wolff. `observables()` returns a dict of all cached values without recomputation.
 - **Branchless inner loops** wherever possible (lookup tables for Metropolis acceptance).
 - **PT engine** (header-only, templated): replica-exchange Metropolis criterion, label-based round-trip tracking, observable streaming. Templated over model type so a single `pt_rounds<Model>()` drives all three models. Extended with `pt_rounds_2d<Model>()` for 2D parameter-space PT (T × D or T × U grids) with separate T-direction and param-direction exchanges via `pt_exchange_param()`.
@@ -100,8 +106,9 @@ A simpler alternative for well-behaved parameter points that don't need replica 
 - **Autocorrelation** (`autocorrelation.py`): FFT-based `acf_fft()` (Wiener-Khinchin), `tau_int()` via first zero crossing, `tau_int_multi()` for sweep-dict bottleneck detection.
 - **Spectral** (`spectral.py`): Connectivity check for 2D PT grids. Builds lazy random-walk transition matrix from edge acceptance rates, checks spectral gap (1 − λ₂) via dense `np.linalg.eigh` (grids are small, typically 10–200 nodes). Returns `ConnectivityResult` with Fiedler vector on failure for diagnostics.
 - **Convergence** (`convergence.py`): Two-initialization convergence check. Compares observable streams from independent cold-start and hot-start PT runs using block-averaged Welch t-test with Bonferroni correction. Returns `ConvergenceResult` with per-slot disagreement map.
-- **I/O** (`io.py`): HDF5 snapshot streaming via `SnapshotWriter` context manager. Flat schema: root-level `(M, N, C, L, L)` snapshot dataset + `(M, N)` observable datasets, indexed by slot via `slot_keys` JSON attr. ~4 h5py calls per production round (vs 40k with old per-group schema). Auto-extends datasets on resume. Metadata persisted every round for crash safety. Resume state via `read_resume_state()` / `read_resume_state_2d()` with old per-group fallback. See `docs/HDF5_SCHEMAS.md` for full schema reference (flat vs legacy per-group).
-- **Orchestrator** (`orchestrator.py`): Campaign manager for sequential 1D and 2D PT runs. Handles fresh/resume workflow, file discovery, OMP thread configuration, and seed derivation. Entry points: `generate_dataset()` (1D) and `generate_dataset_2d()` (2D).
+- **Registry** (`registry.py`): Single source of truth for model metadata. `ModelInfo` dataclass holds constructor, `n_channels`, `snapshot_dtype`, `param_label`, `set_param`, and PT round functions. All engines, I/O, orchestrator, and scripts look up model info via `get_model_info(name)` instead of maintaining their own dispatch dicts. Adding a new model requires one registry entry.
+- **I/O** (`io.py`): HDF5 snapshot streaming via `SnapshotWriter` context manager. Flat schema (only supported format): root-level `(M, N, C, L, L)` snapshot dataset + `(M, N)` observable datasets, indexed by slot via `slot_keys` JSON attr. Snapshot dtype is parameterized (stored as `snapshot_dtype` HDF5 attr) — not hardcoded to `int8`. ~4 h5py calls per production round. Auto-extends datasets on resume. Metadata persisted every round for crash safety. Resume state via `read_resume_state()` / `read_resume_state_2d()`. See `docs/HDF5_SCHEMAS.md` for full schema reference.
+- **Orchestrator** (`orchestrator.py`): Campaign manager for sequential 1D and 2D PT runs. Handles fresh/resume workflow, file discovery, OMP thread configuration, and seed derivation. Uses registry for model validation and param labels. Entry points: `generate_dataset()` (1D) and `generate_dataset_2d()` (2D).
 
 ## Directory Layout
 
@@ -114,7 +121,7 @@ pbc_datagen/
 │   ├── ARCHITECTURE.md         # This file
 │   ├── PLAN.md                 # Implementation plan
 │   ├── LESSONS.md              # Hard-won physics/build/testing insights
-│   └── HDF5_SCHEMAS.md         # Flat vs per-group HDF5 schema reference
+│   └── HDF5_SCHEMAS.md         # HDF5 flat schema reference
 ├── src/cpp/
 │   ├── include/
 │   │   ├── xoshiro256pp.hpp    # Vendored Xoshiro256++ PRNG engine
@@ -138,11 +145,13 @@ pbc_datagen/
 │   ├── single_chain.py         # SingleChainEngine: single-chain MCMC (no replica exchange)
 │   ├── spectral.py             # Spectral connectivity check for 2D PT grids
 │   ├── convergence.py          # Two-initialization convergence check (Welch t-test)
+│   ├── registry.py             # Model registry — single source of truth for model metadata
 │   └── io.py                   # HDF5 streaming I/O (SnapshotWriter, resume state)
 ├── tests/
 │   ├── conftest.py             # Pytest config (OMP_NUM_THREADS cap)
 │   ├── test_foundation.py      # PRNG + neighbor table tests
 │   ├── exact_2x2.py            # Shared exact partition functions (Ising/BC/AT)
+│   ├── test_snapshot_method.py  # snapshot() shape/dtype/values + randomize() tests
 │   ├── test_observable_cache.py # O(1) cache consistency for all 3 models
 │   ├── test_autocorrelation.py # FFT acf, τ_int for white noise & AR(1)
 │   ├── test_spectral.py        # Spectral connectivity: mixing, isolated clusters
@@ -182,7 +191,7 @@ pbc_datagen/
     ├── generate_dataset.py     # Main entry point for 1D PT dataset generation
     ├── generate_single.py      # CLI entry point for single-chain MCMC generation
     ├── generate_single_parallel.py # Parallel sweep of (T, param) grid via single-chain
-    ├── convert_to_pt.py        # HDF5 → .pt converter (both schemas)
+    ├── convert_to_pt.py        # HDF5 → .pt converter (flat schema)
     ├── plot_obs_vs_T.py        # Observable vs temperature curves from HDF5 or .pt
     └── plot_snapshots.py       # Random snapshot samples from HDF5 or .pt
 ```

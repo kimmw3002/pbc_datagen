@@ -92,6 +92,29 @@ Hard-won insights from building this codebase. Read this before writing new code
   back to `f.attrs["key"]` to handle both old (small grid) and new (large grid)
   files.
 
+## Architecture / Design
+
+- **A model registry eliminates dispatch dict duplication.** Before the registry,
+  `_MODEL_CONSTRUCTORS`, `_PT_ROUNDS_FN`, `_PARAM_LABELS`, and `_VALID_MODELS` dicts
+  were duplicated across `parallel_tempering.py`, `pt_engine_2d.py`, `single_chain.py`,
+  and `orchestrator.py`. Adding a model meant editing ~16 files. Fix: one `ModelInfo`
+  dataclass in `registry.py` holds constructor, `n_channels`, `snapshot_dtype`,
+  `param_label`, `set_param`, and PT round functions. All consumers call
+  `get_model_info(name)`. Adding a model = one registry entry.
+
+- **Push polymorphism into C++ via `snapshot()` + `randomize()`.** Python-side if-else
+  for spin collection (`model.spins` vs stacking `model.sigma`/`model.tau`) and
+  randomization (±1 vs {-1,0,+1} vs two-layer ±1) was duplicated in every engine.
+  Fix: each C++ model exposes `snapshot()` → `(C, L, L)` numpy array (owning copy,
+  correct dtype) and `randomize(rng)`. Python just calls the method — no model-specific
+  branching.
+
+- **Parameterize dtype, don't hardcode it.** `SnapshotWriter`, production loops, tests,
+  and scripts all assumed `np.int8`. This blocks continuous-spin models (XY: float64).
+  Fix: `snapshot_dtype` flows from the registry through `create_datasets()` into an HDF5
+  attr. Readers reconstruct the correct dtype from the attr. The snapshot dataset dtype
+  is no longer assumed — it matches whatever the model produces.
+
 ## C++ / Build
 
 - **Rebuild after C++ changes:** `uv sync --all-extras --reinstall-package pbc-datagen`.

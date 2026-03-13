@@ -31,13 +31,13 @@ Tests: `tests/ashkin_teller/` — 2×2 exact (256 states) chi-squared + σ-τ sy
 
 ## Model Interface
 
-Every model exposes: `L`, `spins` (writable numpy view), `set_temperature()`, `energy()`, `sweep()`, `observables()` → `dict[str, float]`.
+Every model exposes: `L`, `spins` (writable numpy view), `set_temperature()`, `energy()`, `sweep()`, `observables()` → `dict[str, float]`, `snapshot()` → `(C, L, L)` numpy array, `randomize(rng)`.
 
-| Model | observables() keys |
-|-------|-------------------|
-| Ising | `energy`, `m`, `abs_m` |
-| Blume-Capel | `energy`, `m`, `abs_m`, `q` |
-| Ashkin-Teller | `energy`, `m_sigma`, `abs_m_sigma`, `m_tau`, `abs_m_tau`, `m_baxter`, `abs_m_baxter` |
+| Model | observables() keys | snapshot shape |
+|-------|-------------------|---------------|
+| Ising | `energy`, `m`, `abs_m` | `(1, L, L)` int8 |
+| Blume-Capel | `energy`, `m`, `abs_m`, `q` | `(1, L, L)` int8 |
+| Ashkin-Teller | `energy`, `m_sigma`, `abs_m_sigma`, `m_tau`, `abs_m_tau`, `m_baxter`, `abs_m_baxter` | `(2, L, L)` int8 |
 
 PT manager and τ_int iterate over ALL keys — never hardcode observable names.
 
@@ -91,115 +91,39 @@ Phase crossing tracker, 2D PT HDF5 streaming, insufficient crossing warnings.
 
 ### 4.1 — Full Pipeline Integration Tests ✅
 
-`tests/test_pipeline_e2e.py` — 48 integration tests covering the full pipeline (simulation → HDF5 → .pt → plots) for all 8 valid (model, mode) combinations. Caught and fixed a bug where `.pt` plotting scripts incorrectly treated single-param files as 2D data, crashing `scipy.griddata`.
+`tests/test_pipeline_e2e.py` — 48 integration tests covering the full pipeline for all 8 valid (model, mode) combinations.
 
-**Total: 333 tests (276 default, 57 integration-only). All pass.**
+## Phase 5: Great Migration — Model-Agnostic Python Stack ✅
 
----
+### 5.0 — C++ `snapshot()` + `randomize()` Methods ✅
 
-## Phase 5: Great Migration — Model-Agnostic Python Stack
+`src/cpp/{ising,blume_capel,ashkin_teller}.{hpp,cpp}`, `bindings.cpp` — uniform `snapshot()` → `(C, L, L)` numpy array and `randomize(rng)` on all models. Tests: `tests/test_snapshot_method.py`.
 
-### Problem
+### 5.1 — Model Registry ✅
 
-Adding a new C++ model (e.g., 2D XY with `float64` angles, classical Heisenberg with 3D vectors) requires touching ~16 files due to:
+`python/pbc_datagen/registry.py` — `ModelInfo` dataclass + `MODEL_REGISTRY` dict + `get_model_info()` / `valid_model_names()`. Single source of truth replacing duplicated dispatch dicts across 4 files.
 
-1. **Hardcoded `int8` dtype** — `SnapshotWriter`, production loops, tests, scripts all assume `np.int8`
-2. **If-else model dispatch** — `C = 2 if ashkin_teller else 1`, spin collection via `.spins` vs `.sigma`/`.tau`, parameter init via `set_crystal_field` vs `set_four_spin_coupling` — repeated in 3 engine files
-3. **Duplicated registries** — `_MODEL_CONSTRUCTORS` and `_PT_ROUNDS_FN` dicts duplicated across `parallel_tempering.py`, `pt_engine_2d.py`, `single_chain.py`, `orchestrator.py`
-4. **Legacy HDF5 format** — per-group schema fallback code in `io.py` and all 3 scripts
+### 5.2 — Generalize I/O Dtype ✅
 
-### Goal
+`io.py` — `create_datasets()` takes `snapshot_dtype` param, stores it as HDF5 attr. `write_round()` accepts any dtype. Float64 round-trip tested.
 
-After migration, adding a new model requires only:
-1. Write C++ model + pybind11 bindings (with `snapshot()` + `randomize()`)
-2. Add one entry to a Python model registry
+### 5.3 — Rewire Engines to Registry + `snapshot()` + `randomize()` ✅
 
-Everything else flows automatically.
+All engines (`parallel_tempering.py`, `pt_engine_2d.py`, `single_chain.py`) and `orchestrator.py` now use `get_model_info()` for construction, PT dispatch, snapshot collection, and param labels. No more dispatch dicts.
 
-### 5.0 — C++ `snapshot()` + `randomize()` Methods
+### 5.4 — Remove Per-Group HDF5 Schema ✅
 
-Additive — zero breakage. Two new uniform interface methods on every model.
+Flat schema is the only format. Removed per-group fallback from `io.py`, all 3 scripts, and tests.
 
-`snapshot()` returns `(C, L, L)` numpy array (correct dtype, owning copy). Eliminates Python-side if-else for spin collection.
+### 5.5 — Fix Dtype in Scripts + Tests ✅
 
-`randomize(Rng&)` randomizes all spins using model-appropriate logic. Eliminates Python-side `_randomize_all()` if-else.
+`convert_to_pt.py` reads `snapshot_dtype` attr for torch dtype mapping. All tests use registry for dtype assertions. CLI scripts use `registry.valid_model_names()`.
 
-- [x] Step 5.0.1: `ising.hpp` + `ising.cpp` — `snapshot()` returns spins copy; `randomize()` sets each spin ±1
-- [x] Step 5.0.2: `bindings.cpp` — bind `IsingModel.snapshot()` → `py::array_t<int8_t>` shape `(1, L, L)`; bind `randomize()`
-- [x] Step 5.0.3: Same for `BlumeCapelModel` — `snapshot()` → `(1, L, L)` int8; `randomize()` draws from {−1, 0, +1}
-- [x] Step 5.0.4: Same for `AshkinTellerModel` — `snapshot()` → `(2, L, L)` int8 (stacks σ+τ in C++); `randomize()` both layers ±1
-- [x] Step 5.0.5: `_core.pyi` — add `snapshot()` and `randomize()` stubs to all 3 classes
-- [x] Step 5.0.6: Test: `tests/test_snapshot_method.py` — shape, dtype, value-match for `snapshot()`; `randomize()` produces non-constant configs; observable cache correctness after `randomize()` (3 tests in `test_observable_cache.py`)
-- [x] Step 5.0.7: Rebuild + full test suite (334 tests pass, 9 deselected)
+### 5.6 — Documentation ✅
 
-### 5.1 — Model Registry
-
-Single source of truth. New file `python/pbc_datagen/registry.py`.
-
-```python
-@dataclasses.dataclass(frozen=True)
-class ModelInfo:
-    name: str                    # "ising", "blume_capel", etc.
-    constructor: type            # _core.IsingModel, etc.
-    n_channels: int              # 1 or 2 (or 3 for Heisenberg)
-    snapshot_dtype: np.dtype     # np.dtype(np.int8), np.dtype(np.float64)
-    param_label: str | None      # None for Ising, "D" for BC, "U" for AT
-    set_param: Callable | None   # e.g. lambda m, v: m.set_crystal_field(v)
-    pt_rounds_fn: Callable       # _core.pt_rounds_ising, etc.
-    pt_rounds_2d_fn: Callable | None  # None for 1D-only models
-```
-
-- [x] Step 5.1.1: Create `registry.py` with `ModelInfo`, `MODEL_REGISTRY`, `get_model_info()`, `valid_model_names()`
-- [x] Step 5.1.2: Populate with ising, blume_capel, ashkin_teller entries
-
-### 5.2 — Generalize I/O Dtype
-
-- [x] Step 5.2.1: `io.py` — add `snapshot_dtype: np.dtype` param to `create_datasets()` (no default — caller must specify)
-- [x] Step 5.2.2: `io.py` — widen `write_round()` annotation from `NDArray[np.int8]` to `NDArray[Any]`
-- [x] Step 5.2.3: `io.py` — store `snapshot_dtype` as HDF5 attr (string: `"int8"`, `"float64"`) for readers
-- [x] Step 5.2.4: Test: `tests/test_io.py` — add float64 round-trip test; update creation test for explicit dtype
-
-### 5.3 — Rewire Engines to Registry + `snapshot()` + `randomize()`
-
-- [x] Step 5.3.1: `parallel_tempering.py` — import `get_model_info`; delete `_MODEL_CONSTRUCTORS`, `_PT_ROUNDS_FN`
-- [x] Step 5.3.2: `parallel_tempering.py` — rewrite `_make_replicas()` via `info.constructor` + `info.set_param`
-- [x] Step 5.3.3: `parallel_tempering.py` — `PTEngine.__init__` uses `info.pt_rounds_fn`
-- [x] Step 5.3.4: `parallel_tempering.py` — `produce()`: `info.n_channels`, `info.snapshot_dtype`, `replica.snapshot()`
-- [x] Step 5.3.5: `pt_engine_2d.py` — delete dicts; use registry; `_randomize_all()` → `model.randomize()`
-- [x] Step 5.3.6: `pt_engine_2d.py` — `produce()`: same n_channels/dtype/snapshot() changes
-- [x] Step 5.3.7: `single_chain.py` — delete `_MODEL_CONSTRUCTORS`; rewrite `_make_model()` via registry
-- [x] Step 5.3.8: `single_chain.py` — `produce()`: same changes
-- [x] Step 5.3.9: `orchestrator.py` — delete `_VALID_MODELS`, `_PARAM_LABELS`; use `get_model_info().param_label`
-- [x] Step 5.3.10: Run full test suite — all 334 tests pass
-
-### 5.4 — Remove Per-Group HDF5 Schema Everywhere
-
-Flat schema is the only format. Old per-group `.h5` files become unsupported.
-
-- [x] Step 5.4.1: `io.py` — `read_resume_state()`: remove per-group fallback; raise if `slot_keys` missing
-- [x] Step 5.4.2: `io.py` — `read_resume_state_2d()`: same
-- [x] Step 5.4.3: `io.py` — `_snapshot_count()`: remove per-group fallback
-- [x] Step 5.4.4: `scripts/convert_to_pt.py` — remove `_read_per_group_schema()` and schema-detection dispatch
-- [x] Step 5.4.5: `scripts/plot_obs_vs_T.py` — remove per-group reading branch
-- [x] Step 5.4.6: `scripts/plot_snapshots.py` — remove per-group reading branch
-- [x] Step 5.4.7: `tests/test_io.py` — remove old-format tests (`test_old_format_group_*`)
-- [x] Step 5.4.8: Run full test suite
-
-### 5.5 — Fix Dtype in Scripts + Tests
-
-- [x] Step 5.5.1: `scripts/convert_to_pt.py` — read `snapshot_dtype` attr; map to torch dtype dynamically (fallback `"int8"`)
-- [x] Step 5.5.2: `tests/test_produce.py` — dtype assertion via registry instead of hardcoded `np.int8`
-- [x] Step 5.5.3: `tests/test_e2e.py` — same
-- [x] Step 5.5.4: `tests/test_single_chain.py` — same
-- [x] Step 5.5.5: `tests/test_io.py` — `_random_spins` helper accepts dtype param
-- [x] Step 5.5.6: CLI scripts (`generate_dataset.py`, `generate_single.py`, `generate_single_parallel.py`) — `VALID_MODELS` → `registry.valid_model_names()`
-- [x] Step 5.5.7: Full verify: `mypy . && ruff check . && ruff format --check . && pytest`
-
-### 5.6 — Documentation
-
-- [ ] Step 5.6.1: Update `docs/ARCHITECTURE.md` — registry pattern, `snapshot()`/`randomize()` interface, dtype-parameterized I/O
-- [ ] Step 5.6.2: Update `docs/HDF5_SCHEMAS.md` — `snapshot_dtype` attr; remove per-group schema
-- [ ] Step 5.6.3: Update `docs/LESSONS.md` — registry pattern lesson
+- [x] Step 5.6.1: Update `docs/ARCHITECTURE.md` — registry pattern, `snapshot()`/`randomize()` interface, dtype-parameterized I/O
+- [x] Step 5.6.2: Update `docs/HDF5_SCHEMAS.md` — `snapshot_dtype` attr; remove per-group schema
+- [x] Step 5.6.3: Update `docs/LESSONS.md` — registry pattern lesson
 
 ### Post-Migration: Adding a New Model
 
@@ -222,6 +146,8 @@ MODEL_REGISTRY["xy"] = ModelInfo(
 )
 # Done. All engines, I/O, orchestrator, scripts work automatically.
 ```
+
+**Total: 333 tests (276 default, 57 integration-only). All pass.**
 
 ---
 
