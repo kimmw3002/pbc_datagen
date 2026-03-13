@@ -183,8 +183,8 @@ First continuous-spin model — float64 snapshots, O(2) Wolff cluster, BKT trans
 
 ### Phase 6.2: Metropolis Sweep
 
-- [ ] Step 6.2.1: `xy.cpp` — `_metropolis_sweep()`: N random-site proposals with uniform angular window [−Δ, Δ]. `_delta_energy(site, new_theta)`.
-- [ ] Step 6.2.2: `tests/xy/test_metropolis.py` — Acceptance rate sanity, ΔE formula correctness, detailed balance via energy histogram.
+- [x] Step 6.2.1: `xy.cpp` — `_metropolis_sweep()`: N random-site proposals with θ' ~ Uniform[0, 2π). No tunable window — just pick a completely random angle. Accept with min(1, exp(−βΔE)).
+- [x] Step 6.2.2: `tests/xy/test_metropolis.py` — Acceptance rate sanity, ΔE formula correctness, detailed balance via energy histogram.
 
 ### Phase 6.3: Combined Sweep + Observable Caching
 

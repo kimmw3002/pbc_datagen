@@ -80,6 +80,11 @@ struct XYModel {
     // Returns the cluster size.
     int _wolff_step();
 
+    // Metropolis sweep: N random-site proposals, each with θ' ~ Uniform[0, 2π).
+    // Accept with probability min(1, exp(−βΔE)).
+    // Returns the number of accepted proposals.
+    int _metropolis_sweep();
+
     // Normalize an angle to [0, 2π).
     static double normalize_angle(double a);
 };

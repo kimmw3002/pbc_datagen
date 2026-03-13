@@ -233,4 +233,62 @@ int XYModel::_wolff_step() {
     return cluster_size;
 }
 
+// --- _metropolis_sweep -------------------------------------------------------
+// Metropolis algorithm for continuous spins (Metropolis et al., 1953).
+//
+// One "sweep" = N single-site update proposals, where N = L×L.
+//
+//   For each proposal:
+//     1. Pick a random site i (uniformly from [0, N)).
+//     2. Propose a new angle θ' ~ Uniform[0, 2π).
+//        (No tunable window — the full circle is the proposal distribution.)
+//     3. Compute ΔE = E(θ') − E(θ_i) = Σ_{j∈nbr(i)} [cos(θ_i − θ_j) − cos(θ' − θ_j)].
+//        Only the 4 neighbor bonds of site i change.
+//     4. Accept with probability min(1, exp(−βΔE)):
+//        - If ΔE ≤ 0, always accept (energy went down or stayed the same).
+//        - If ΔE > 0, accept with probability exp(−βΔE).
+//     5. If accepted, update θ_i and the cached observables.
+//
+// Detailed balance holds because the proposal distribution is symmetric:
+//   q(θ → θ') = q(θ' → θ) = 1/(2π).
+// So the acceptance ratio reduces to the Boltzmann ratio exp(−βΔE).
+//
+// Important: sites are chosen RANDOMLY, not sequentially.  A sequential
+// sweep (0, 1, 2, ..., N−1) creates correlations — see docs/LESSONS.md.
+
+int XYModel::_metropolis_sweep() {
+    double beta = 1.0 / T_;
+    int n_accepted = 0;
+
+    for (int step = 0; step < N; ++step) {
+        // 1. Random site.
+        int site = static_cast<int>(rng.rand_below(static_cast<uint64_t>(N)));
+
+        // 2. Propose a completely random new angle θ' ∈ [0, 2π).
+        double new_theta = rng.uniform() * TWO_PI;
+
+        // 3. Compute ΔE from the 4 neighbor bonds of this site.
+        //    Old bond energy contribution: -Σ_j cos(θ_old − θ_j)
+        //    New bond energy contribution: -Σ_j cos(θ_new − θ_j)
+        //    ΔE = Σ_j [cos(θ_old − θ_j) − cos(θ_new − θ_j)]
+        double old_theta = theta[static_cast<size_t>(site)];
+        double delta_E = 0.0;
+        for (int d = 0; d < 4; ++d) {
+            int j = nbr[static_cast<size_t>(site * 4 + d)];
+            double tj = theta[static_cast<size_t>(j)];
+            delta_E += std::cos(old_theta - tj) - std::cos(new_theta - tj);
+        }
+
+        // 4. Metropolis acceptance: accept if ΔE ≤ 0, else with prob exp(−βΔE).
+        if (delta_E <= 0.0 || rng.uniform() < std::exp(-beta * delta_E)) {
+            // 5. Accept: update the spin via set_spin (handles cache update
+            //    and angle normalization).
+            set_spin(site, new_theta);
+            ++n_accepted;
+        }
+    }
+
+    return n_accepted;
+}
+
 }  // namespace pbc

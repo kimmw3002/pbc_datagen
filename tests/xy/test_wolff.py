@@ -256,7 +256,7 @@ def test_wolff_detailed_balance_2x2(T: float) -> None:
 
     The 2×2 XY model has continuous energy in [-8, +8].  We bin the
     energy range and compare the MCMC histogram against exact bin
-    probabilities computed by numerical quadrature (128³ grid, fixing
+    probabilities computed by numerical quadrature (256³ grid, fixing
     θ₀ = 0 by O(2) symmetry).
 
     Chi-squared test with p > 0.001, same threshold as the discrete
@@ -272,7 +272,7 @@ def test_wolff_detailed_balance_2x2(T: float) -> None:
     n_bins = 20
     bin_edges = np.linspace(-8.0, 8.0, n_bins + 1)
 
-    exact_probs = xy_2x2_exact_energy_histogram(T, bin_edges, n_grid=128)
+    exact_probs = xy_2x2_exact_energy_histogram(T, bin_edges, n_grid=256)
 
     model = XYModel(L=2, seed=42)
     model.set_temperature(T)

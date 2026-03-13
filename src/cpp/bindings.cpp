@@ -264,6 +264,7 @@ PYBIND11_MODULE(_core, m) {
         .def("my", &pbc::XYModel::my)
         .def("abs_magnetization", &pbc::XYModel::abs_magnetization)
         .def("_wolff_step", &pbc::XYModel::_wolff_step)
+        .def("_metropolis_sweep", &pbc::XYModel::_metropolis_sweep)
         .def("observables", [](const pbc::XYModel& self) {
             py::dict out;
             for (auto& [name, val] : self.observables())
