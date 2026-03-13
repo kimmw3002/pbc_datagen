@@ -92,7 +92,12 @@ def _plot_pt(args: argparse.Namespace) -> None:
     else:
         param_label = None
 
-    is_2d = param_label is not None
+    # Only treat as 2D if there are multiple distinct param values
+    if param_label is not None:
+        distinct_params = {round(r[param_label], 4) for r in records}
+        is_2d = len(distinct_params) > 1
+    else:
+        is_2d = False
     model_type = args.input.stem
 
     # Group by (T, param)

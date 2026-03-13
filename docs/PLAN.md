@@ -89,7 +89,11 @@ Phase crossing tracker, 2D PT HDF5 streaming, insufficient crossing warnings.
 
 `scripts/convert_to_pt.py`, `scripts/plot_obs_vs_T.py`, `scripts/plot_snapshots.py`. 3 E2E tests.
 
-**Total: 331 tests (322 default, 9 integration-only). All pass.**
+### 4.1 — Full Pipeline Integration Tests ✅
+
+`tests/test_pipeline_e2e.py` — 48 integration tests covering the full pipeline (simulation → HDF5 → .pt → plots) for all 8 valid (model, mode) combinations. Caught and fixed a bug where `.pt` plotting scripts incorrectly treated single-param files as 2D data, crashing `scipy.griddata`.
+
+**Total: 333 tests (276 default, 57 integration-only). All pass.**
 
 ---
 

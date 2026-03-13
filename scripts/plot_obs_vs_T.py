@@ -71,7 +71,12 @@ def load_pt_obs(
     else:
         param_label = None
 
-    is_2d = param_label is not None
+    # Only treat as 2D if there are multiple distinct param values
+    if param_label is not None:
+        distinct_params = {round(r[param_label], 4) for r in records}
+        is_2d = len(distinct_params) > 1
+    else:
+        is_2d = False
 
     # Observable names = all keys except state, T, param
     skip = {"state", "T"}
