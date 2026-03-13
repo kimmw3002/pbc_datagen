@@ -27,32 +27,18 @@ from pbc_datagen.autocorrelation import tau_int_multi
 from pbc_datagen.io import SnapshotWriter, _t_group_name, read_resume_state
 from pbc_datagen.orchestrator import _derive_seed, _param_label
 from pbc_datagen.parallel_tempering import welch_equilibration_check
+from pbc_datagen.registry import get_model_info
 
 Model = Union[_core.IsingModel, _core.BlumeCapelModel, _core.AshkinTellerModel]
-
-_MODEL_CONSTRUCTORS = {
-    "ising": _core.IsingModel,
-    "blume_capel": _core.BlumeCapelModel,
-    "ashkin_teller": _core.AshkinTellerModel,
-}
 
 
 def _make_model(model_type: str, L: int, param_value: float, T: float, seed: int) -> Model:
     """Create a single model instance and set its temperature + param."""
-    m: Model
-    if model_type == "blume_capel":
-        bc = _core.BlumeCapelModel(L, seed)
-        bc.set_crystal_field(param_value)
-        bc.set_temperature(T)
-        m = bc
-    elif model_type == "ashkin_teller":
-        at = _core.AshkinTellerModel(L, seed)
-        at.set_four_spin_coupling(param_value)
-        at.set_temperature(T)
-        m = at
-    else:
-        m = _core.IsingModel(L, seed)
-        m.set_temperature(T)
+    info = get_model_info(model_type)
+    m: Model = info.constructor(L, seed)
+    if info.set_param is not None:
+        info.set_param(m, param_value)
+    m.set_temperature(T)
     return m
 
 
@@ -72,9 +58,7 @@ class SingleChainEngine:
         T: float,
         seed: int,
     ) -> None:
-        if model_type not in _MODEL_CONSTRUCTORS:
-            msg = f"Unknown model type: {model_type!r}"
-            raise ValueError(msg)
+        get_model_info(model_type)  # raises ValueError if unknown
 
         self.model_type = model_type
         self.L = L
@@ -170,7 +154,8 @@ class SingleChainEngine:
             seed_history = [(0, self.seed)]
 
         L = self.L
-        C = 2 if self.model_type == "ashkin_teller" else 1
+        info = get_model_info(self.model_type)
+        C = info.n_channels
         obs_names = list(self.model.observables().keys())
         thinning_base = max(2, math.ceil(3 * self.tau_max))
         thin_rng = np.random.default_rng(self.seed)
@@ -226,14 +211,7 @@ class SingleChainEngine:
                 self.model.sweep(actual_thin)
 
                 # Harvest snapshot — M=1 batch
-                if self.model_type == "ashkin_teller":
-                    spins = np.stack(
-                        [self.model.sigma, self.model.tau]  # type: ignore[union-attr]
-                    ).astype(np.int8)
-                else:
-                    spins = self.model.spins[np.newaxis].copy()  # type: ignore[union-attr]
-
-                all_spins = spins[np.newaxis]  # (1, C, L, L)
+                all_spins = self.model.snapshot()[np.newaxis]  # (1, C, L, L)
                 obs = self.model.observables()
                 all_obs = {name: np.array([obs[name]]) for name in obs_names}
 

@@ -145,9 +145,8 @@ class ModelInfo:
     pt_rounds_2d_fn: Callable | None  # None for 1D-only models
 ```
 
-- [ ] Step 5.1.1: Create `registry.py` with `ModelInfo`, `MODEL_REGISTRY`, `get_model_info()`, `valid_model_names()`
-- [ ] Step 5.1.2: Populate with ising, blume_capel, ashkin_teller entries
-- [ ] Step 5.1.3: Test: `tests/test_registry.py` — 3 entries, field values, unknown raises ValueError
+- [x] Step 5.1.1: Create `registry.py` with `ModelInfo`, `MODEL_REGISTRY`, `get_model_info()`, `valid_model_names()`
+- [x] Step 5.1.2: Populate with ising, blume_capel, ashkin_teller entries
 
 ### 5.2 — Generalize I/O Dtype
 
@@ -158,16 +157,16 @@ class ModelInfo:
 
 ### 5.3 — Rewire Engines to Registry + `snapshot()` + `randomize()`
 
-- [ ] Step 5.3.1: `parallel_tempering.py` — import `get_model_info`; delete `_MODEL_CONSTRUCTORS`, `_PT_ROUNDS_FN`
-- [ ] Step 5.3.2: `parallel_tempering.py` — rewrite `_make_replicas()` via `info.constructor` + `info.set_param`
-- [ ] Step 5.3.3: `parallel_tempering.py` — `PTEngine.__init__` uses `info.pt_rounds_fn`
-- [ ] Step 5.3.4: `parallel_tempering.py` — `produce()`: `info.n_channels`, `info.snapshot_dtype`, `replica.snapshot()`
-- [ ] Step 5.3.5: `pt_engine_2d.py` — delete dicts; use registry; `_randomize_all()` → `model.randomize()`
-- [ ] Step 5.3.6: `pt_engine_2d.py` — `produce()`: same n_channels/dtype/snapshot() changes
-- [ ] Step 5.3.7: `single_chain.py` — delete `_MODEL_CONSTRUCTORS`; rewrite `_make_model()` via registry
-- [ ] Step 5.3.8: `single_chain.py` — `produce()`: same changes
-- [ ] Step 5.3.9: `orchestrator.py` — delete `_VALID_MODELS`, `_PARAM_LABELS`; use `get_model_info().param_label`
-- [ ] Step 5.3.10: Run full test suite — all 331 tests pass
+- [x] Step 5.3.1: `parallel_tempering.py` — import `get_model_info`; delete `_MODEL_CONSTRUCTORS`, `_PT_ROUNDS_FN`
+- [x] Step 5.3.2: `parallel_tempering.py` — rewrite `_make_replicas()` via `info.constructor` + `info.set_param`
+- [x] Step 5.3.3: `parallel_tempering.py` — `PTEngine.__init__` uses `info.pt_rounds_fn`
+- [x] Step 5.3.4: `parallel_tempering.py` — `produce()`: `info.n_channels`, `info.snapshot_dtype`, `replica.snapshot()`
+- [x] Step 5.3.5: `pt_engine_2d.py` — delete dicts; use registry; `_randomize_all()` → `model.randomize()`
+- [x] Step 5.3.6: `pt_engine_2d.py` — `produce()`: same n_channels/dtype/snapshot() changes
+- [x] Step 5.3.7: `single_chain.py` — delete `_MODEL_CONSTRUCTORS`; rewrite `_make_model()` via registry
+- [x] Step 5.3.8: `single_chain.py` — `produce()`: same changes
+- [x] Step 5.3.9: `orchestrator.py` — delete `_VALID_MODELS`, `_PARAM_LABELS`; use `get_model_info().param_label`
+- [x] Step 5.3.10: Run full test suite — all 334 tests pass
 
 ### 5.4 — Remove Per-Group HDF5 Schema Everywhere
 

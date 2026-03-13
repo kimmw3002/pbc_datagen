@@ -25,6 +25,7 @@ from scipy import stats
 import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int, tau_int_multi
 from pbc_datagen.io import SnapshotWriter, _t_group_name
+from pbc_datagen.registry import get_model_info
 
 # Union of all model types — mypy needs this to see set_temperature etc.
 Model = Union[_core.IsingModel, _core.BlumeCapelModel, _core.AshkinTellerModel]
@@ -250,18 +251,6 @@ def welch_equilibration_check(
 # Model factory — creates M replica objects from a model type string
 # ---------------------------------------------------------------------------
 
-_MODEL_CONSTRUCTORS = {
-    "ising": _core.IsingModel,
-    "blume_capel": _core.BlumeCapelModel,
-    "ashkin_teller": _core.AshkinTellerModel,
-}
-
-_PT_ROUNDS_FN = {
-    "ising": _core.pt_rounds_ising,
-    "blume_capel": _core.pt_rounds_bc,
-    "ashkin_teller": _core.pt_rounds_at,
-}
-
 
 def _make_replicas(
     model_type: str, L: int, param_value: float, n_replicas: int, seed: int
@@ -271,23 +260,15 @@ def _make_replicas(
     Each replica gets a unique seed derived from the master seed.
     The shared RNG (for exchange decisions) uses the master seed directly.
     """
+    info = get_model_info(model_type)
     rng = _core.Rng(seed)
 
     replicas: list[Model] = []
     for i in range(n_replicas):
-        # Each replica needs its own RNG — derive a unique seed
         replica_seed = (seed + i + 1) % (2**63)
-        m: Model
-        if model_type == "blume_capel":
-            bc = _core.BlumeCapelModel(L, replica_seed)
-            bc.set_crystal_field(param_value)
-            m = bc
-        elif model_type == "ashkin_teller":
-            at = _core.AshkinTellerModel(L, replica_seed)
-            at.set_four_spin_coupling(param_value)
-            m = at
-        else:
-            m = _core.IsingModel(L, replica_seed)
+        m: Model = info.constructor(L, replica_seed)
+        if info.set_param is not None:
+            info.set_param(m, param_value)
         replicas.append(m)
 
     return replicas, rng
@@ -316,9 +297,7 @@ class PTEngine:
         n_replicas: int,
         seed: int,
     ) -> None:
-        if model_type not in _MODEL_CONSTRUCTORS:
-            msg = f"Unknown model type: {model_type!r}"
-            raise ValueError(msg)
+        info = get_model_info(model_type)  # raises ValueError if unknown
 
         self.model_type = model_type
         self.L = L
@@ -342,7 +321,7 @@ class PTEngine:
         self.labels = [_core.LABEL_NONE] * n_replicas
 
         # Select the right C++ pt_rounds function
-        self._pt_rounds = _PT_ROUNDS_FN[model_type]  # type: ignore[assignment]
+        self._pt_rounds = info.pt_rounds_fn  # type: ignore[assignment]
 
         # State flags
         self.ladder_locked = False
@@ -638,8 +617,8 @@ class PTEngine:
         M = self.n_replicas
         L = self.L
 
-        # Channel count: AT has 2 spin layers (σ, τ), others have 1
-        C = 2 if self.model_type == "ashkin_teller" else 1
+        info = get_model_info(self.model_type)
+        C = info.n_channels
         obs_names = list(self.replicas[0].observables().keys())
 
         # Thinning: at least 2 rounds between snapshots
@@ -710,19 +689,13 @@ class PTEngine:
                 total_round_trips += result["round_trip_count"]
 
                 # Batch-collect one snapshot from every T slot
-                all_spins = np.empty((M, C, L, L), dtype=np.int8)
+                all_spins = np.empty((M, C, L, L), dtype=info.snapshot_dtype)
                 all_obs: dict[str, npt.NDArray[np.float64]] = {
                     name: np.empty(M, dtype=np.float64) for name in obs_names
                 }
                 for t in range(M):
                     replica = self.replicas[self.t2r[t]]
-
-                    if self.model_type == "ashkin_teller":
-                        all_spins[t] = np.stack(
-                            [replica.sigma, replica.tau]  # type: ignore[union-attr]
-                        ).astype(np.int8)
-                    else:
-                        all_spins[t] = replica.spins[np.newaxis].copy()  # type: ignore[union-attr]
+                    all_spins[t] = replica.snapshot()
 
                     obs = replica.observables()
                     for name in obs_names:

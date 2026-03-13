@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Callable, Union
+from typing import Union
 
 import numpy as np
 import numpy.typing as npt
@@ -24,24 +24,10 @@ import pbc_datagen._core as _core
 from pbc_datagen.autocorrelation import tau_int_multi
 from pbc_datagen.convergence import convergence_check
 from pbc_datagen.io import SnapshotWriter, _slot_group_name_2d
+from pbc_datagen.registry import get_model_info
 from pbc_datagen.spectral import check_connectivity
 
 Model = Union[_core.BlumeCapelModel, _core.AshkinTellerModel]
-
-_PARAM_LABELS: dict[str, str] = {
-    "blume_capel": "D",
-    "ashkin_teller": "U",
-}
-
-_MODEL_CONSTRUCTORS: dict[str, type] = {
-    "blume_capel": _core.BlumeCapelModel,
-    "ashkin_teller": _core.AshkinTellerModel,
-}
-
-_PT_ROUNDS_2D_FN: dict[str, Callable[..., _core.PT2DResult]] = {
-    "blume_capel": _core.pt_rounds_2d_bc,
-    "ashkin_teller": _core.pt_rounds_2d_at,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -65,41 +51,20 @@ def _make_replicas_2d(
         ``"cold"`` — all spins +1 (constructor default).
         ``"random"`` — randomize spins after construction.
     """
+    info = get_model_info(model_type)
     rng = _core.Rng(seed)
-    ctor = _MODEL_CONSTRUCTORS[model_type]
     replicas: list[Model] = []
 
     for i in range(M):
         replica_seed = (seed + i + 1) % (2**63)
-        m: Model = ctor(L, replica_seed)
+        m: Model = info.constructor(L, replica_seed)
         replicas.append(m)
 
     if init == "random":
-        np_rng = np.random.default_rng(seed ^ 0xDEAD_BEEF)
-        _randomize_all(replicas, model_type, L, np_rng)
+        for m in replicas:
+            m.randomize()
 
     return replicas, rng
-
-
-def _randomize_all(
-    replicas: list[Model],
-    model_type: str,
-    L: int,
-    np_rng: np.random.Generator,
-) -> None:
-    """Randomize spins for all replicas (hot-start initialization)."""
-    N = L * L
-    for m in replicas:
-        if model_type == "blume_capel":
-            vals = np_rng.choice([-1, 0, 1], size=N)
-            for site in range(N):
-                m.set_spin(site, int(vals[site]))  # type: ignore[union-attr]
-        elif model_type == "ashkin_teller":
-            svals = np_rng.choice([-1, 1], size=N)
-            tvals = np_rng.choice([-1, 1], size=N)
-            for site in range(N):
-                m.set_sigma(site, int(svals[site]))  # type: ignore[union-attr]
-                m.set_tau(site, int(tvals[site]))  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +115,9 @@ class PTEngine2D:
         n_P: int,
         seed: int,
     ) -> None:
-        if model_type not in _MODEL_CONSTRUCTORS:
-            msg = f"2D PT only supports blume_capel and ashkin_teller, got {model_type!r}"
+        info = get_model_info(model_type)
+        if info.pt_rounds_2d_fn is None:
+            msg = f"2D PT not supported for {model_type!r} (no pt_rounds_2d_fn)"
             raise ValueError(msg)
 
         self.model_type = model_type
@@ -160,7 +126,7 @@ class PTEngine2D:
         self.n_P = n_P
         self.M = n_T * n_P
         self.seed = seed
-        self.param_label = _PARAM_LABELS[model_type]
+        self.param_label = info.param_label or ""
 
         self.temps = np.geomspace(T_range[0], T_range[1], n_T)
         self.params = np.linspace(param_range[0], param_range[1], n_P)
@@ -174,7 +140,7 @@ class PTEngine2D:
         self.s2r = list(range(self.M))
 
         # C++ dispatch
-        self._pt_rounds_2d = _PT_ROUNDS_2D_FN[model_type]
+        self._pt_rounds_2d = info.pt_rounds_2d_fn
 
         # State flags
         self.connectivity_checked = False
@@ -438,7 +404,8 @@ class PTEngine2D:
             seed_history = [(0, self.seed)]
 
         L = self.L
-        C = 2 if self.model_type == "ashkin_teller" else 1
+        info = get_model_info(self.model_type)
+        C = info.n_channels
         obs_names = list(self.replicas[0].observables().keys())
         thinning_base = max(2, math.ceil(3 * self.tau_max))
         thin_rng = np.random.default_rng(self.seed)
@@ -499,19 +466,13 @@ class PTEngine2D:
                 self._run_pt(self.replicas, self.r2s, self.s2r, actual_thin, self.rng, False)
 
                 # Batch-collect one snapshot from every slot
-                all_spins = np.empty((self.M, C, L, L), dtype=np.int8)
+                all_spins = np.empty((self.M, C, L, L), dtype=info.snapshot_dtype)
                 all_obs: dict[str, npt.NDArray[np.float64]] = {
                     name: np.empty(self.M, dtype=np.float64) for name in obs_names
                 }
                 for s in range(self.M):
                     replica = self.replicas[self.s2r[s]]
-
-                    if self.model_type == "ashkin_teller":
-                        all_spins[s] = np.stack(
-                            [replica.sigma, replica.tau]  # type: ignore[union-attr]
-                        ).astype(np.int8)
-                    else:
-                        all_spins[s] = replica.spins[np.newaxis].copy()  # type: ignore[union-attr]
+                    all_spins[s] = replica.snapshot()
 
                     obs = replica.observables()
                     for name in obs_names:

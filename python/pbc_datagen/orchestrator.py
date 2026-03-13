@@ -12,13 +12,7 @@ from loguru import logger
 from pbc_datagen.io import read_resume_state, read_resume_state_2d
 from pbc_datagen.parallel_tempering import PTEngine
 from pbc_datagen.pt_engine_2d import PTEngine2D
-
-_VALID_MODELS: set[str] = {"ising", "blume_capel", "ashkin_teller"}
-
-_PARAM_LABELS: dict[str, str] = {
-    "blume_capel": "D",
-    "ashkin_teller": "U",
-}
+from pbc_datagen.registry import get_model_info
 
 
 def _param_label(model_type: str) -> str | None:
@@ -27,10 +21,8 @@ def _param_label(model_type: str) -> str | None:
     Ising has no tunable Hamiltonian parameter (J=1 is fixed in C++),
     so it returns None.  Blume-Capel → "D", Ashkin-Teller → "U".
     """
-    if model_type not in _VALID_MODELS:
-        msg = f"Unknown model type: {model_type!r}"
-        raise ValueError(msg)
-    return _PARAM_LABELS.get(model_type)
+    info = get_model_info(model_type)  # raises ValueError if unknown
+    return info.param_label
 
 
 def _derive_seed(old_seed: int, n_existing: int) -> int:
