@@ -194,8 +194,13 @@ def main() -> None:
         is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
         param_label = str(f.attrs["param_label"]) if is_2d else None
 
-        # Detect flat vs old per-group schema
+        # Only flat schema is supported
         is_flat = "slot_keys" in f.attrs
+        if not is_flat:
+            raise ValueError(
+                f"Unsupported HDF5 format in {args.input}: missing 'slot_keys' attr. "
+                "Only the flat schema is supported."
+            )
         _ds = f.get("disagreement_slots") or f.attrs.get("disagreement_slots", [])
         _disagree_indices: list[int] = list(np.asarray(_ds, dtype=int).tolist())
         if is_flat and _disagree_indices:
@@ -267,82 +272,6 @@ def main() -> None:
                 C_val = snap_data.shape[1]
                 n_pick = min(args.n, N)
                 indices = sorted(rng.choice(N, size=n_pick, replace=False).tolist())
-
-                if C_val == 1:
-                    ncols = n_pick
-                    fig, axes = plt.subplots(1, ncols, figsize=(1.5 * ncols, 2), squeeze=False)
-                    plot_single_channel(axes[0], snap_data, indices)
-                else:
-                    ncols = n_pick
-                    fig, axes = plt.subplots(3, ncols, figsize=(1.5 * ncols, 4.5), squeeze=False)
-                    plot_two_channel(axes, snap_data, indices)
-
-                if is_2d:
-                    suptitle = f"{model_type} L={L}  T={T_val:.4f}  {param_label}={pv:.4f}"
-                else:
-                    suptitle = f"{model_type} L={L} param={pv}  T={T_val:.4f}"
-                fig.suptitle(suptitle, fontsize=11)
-                fig.tight_layout()
-
-                if is_2d:
-                    out_name = f"{args.input.stem}_T={T_val:.4f}_{param_label}={pv:.4f}.png"
-                else:
-                    out_name = f"{args.input.stem}_T={T_val:.4f}.png"
-                out_path = args.output_dir / out_name
-                fig.savefig(out_path, dpi=150, bbox_inches="tight")
-                print(f"Saved → {out_path}")
-                plt.close(fig)
-        else:
-            # Old per-group schema fallback
-            if is_2d:
-                assert param_label is not None
-                slots = sorted(
-                    [
-                        (*parse_slot_2d(name, param_label), name)
-                        for name in f
-                        if name.startswith("T=")
-                    ],
-                    key=lambda x: (x[1], x[0]),
-                )
-                slot_iter = [(round(T_val, 4), round(pv, 4), gname) for T_val, pv, gname in slots]
-            else:
-                param_value = f.attrs["param_value"]
-                t_groups = sorted(
-                    [(parse_temperature(name), name) for name in f if name.startswith("T=")],
-                    key=lambda x: x[0],
-                )
-                slot_iter = [(round(T_val, 4), param_value, gname) for T_val, gname in t_groups]
-
-            if args.list:
-                temps = sorted({T_val for T_val, _, _ in slot_iter})
-                params = sorted({pv for _, pv, _ in slot_iter})
-                print(f"T values ({len(temps)}):  {', '.join(f'{t:.4f}' for t in temps)}")
-                if is_2d:
-                    assert param_label is not None
-                    print(
-                        f"{param_label} values ({len(params)}):  "
-                        f"{', '.join(f'{p:.4f}' for p in params)}"
-                    )
-                else:
-                    print(f"param value: {params[0]}")
-                return
-
-            if args.T is not None:
-                t_set = {round(t, 4) for t in args.T}
-                slot_iter = [(T_val, pv, gname) for T_val, pv, gname in slot_iter if T_val in t_set]
-            if args.param is not None:
-                p_set = {round(p, 4) for p in args.param}
-                slot_iter = [(T_val, pv, gname) for T_val, pv, gname in slot_iter if pv in p_set]
-
-            for T_val, pv, gname in slot_iter:
-                snaps = f[gname]["snapshots"]
-                N, C_val, _, _ = snaps.shape
-                if N == 0:
-                    continue
-                n_pick = min(args.n, N)
-                indices = sorted(rng.choice(N, size=n_pick, replace=False).tolist())
-
-                snap_data = snaps[:]
 
                 if C_val == 1:
                     ncols = n_pick

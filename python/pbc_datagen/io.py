@@ -13,20 +13,9 @@ from loguru import logger
 
 
 def _snapshot_count(f: h5py.File) -> int:
-    """Read actual snapshot count, backward-compatible.
-
-    New flat format stores ``count`` as a root attribute.
-    Old per-group format: fall back to the first group's ``snapshots`` shape[0].
-    """
+    """Read actual snapshot count from the flat schema's root ``count`` attr."""
     if "count" in f.attrs:
         return int(f.attrs["count"])
-    # Old-format fallback (per-group)
-    for key in f.keys():
-        obj = f[key]
-        if isinstance(obj, h5py.Group) and "snapshots" in obj:
-            if "count" in obj.attrs:
-                return int(obj.attrs["count"])
-            return int(obj["snapshots"].shape[0])
     return 0
 
 
@@ -249,22 +238,10 @@ def read_resume_state(path: str | Path) -> tuple[int, dict[str, Any]]:
             (int(pair[0]), int(pair[1])) for pair in seed_history_raw
         ]
 
-        # Count snapshots per temperature slot
-        snapshot_counts: dict[str, int] = {}
-        if "slot_keys" in f.attrs:
-            # New flat format
-            slot_keys = json.loads(str(f.attrs["slot_keys"]))
-            count = int(f.attrs["count"])
-            snapshot_counts = {k: count for k in slot_keys}
-        else:
-            # Old per-group fallback
-            for key in f.keys():
-                obj = f[key]
-                if isinstance(obj, h5py.Group) and "snapshots" in obj:
-                    if "count" in obj.attrs:
-                        snapshot_counts[key] = int(obj.attrs["count"])
-                    else:
-                        snapshot_counts[key] = int(obj["snapshots"].shape[0])
+        # Count snapshots per temperature slot (flat schema)
+        slot_keys = json.loads(str(f.attrs["slot_keys"]))
+        count = int(f.attrs["count"])
+        snapshot_counts: dict[str, int] = {k: count for k in slot_keys}
 
     state: dict[str, Any] = {
         "model_type": model_type,
@@ -347,21 +324,10 @@ def read_resume_state_2d(path: str | Path) -> tuple[int, dict[str, Any]]:
             (int(pair[0]), int(pair[1])) for pair in seed_history_raw
         ]
 
-        snapshot_counts: dict[str, int] = {}
-        if "slot_keys" in f.attrs:
-            # New flat format
-            slot_keys = json.loads(str(f.attrs["slot_keys"]))
-            count = int(f.attrs["count"])
-            snapshot_counts = {k: count for k in slot_keys}
-        else:
-            # Old per-group fallback
-            for key in f.keys():
-                obj = f[key]
-                if isinstance(obj, h5py.Group) and "snapshots" in obj:
-                    if "count" in obj.attrs:
-                        snapshot_counts[key] = int(obj.attrs["count"])
-                    else:
-                        snapshot_counts[key] = int(obj["snapshots"].shape[0])
+        # Count snapshots per slot (flat schema)
+        slot_keys = json.loads(str(f.attrs["slot_keys"]))
+        count = int(f.attrs["count"])
+        snapshot_counts: dict[str, int] = {k: count for k in slot_keys}
 
     state: dict[str, Any] = {
         "model_type": model_type,

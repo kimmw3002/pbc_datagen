@@ -417,7 +417,7 @@ class TestReadResumeState:
 
 
 class TestSnapshotCount:
-    """Verify _snapshot_count works for both flat and old formats."""
+    """Verify _snapshot_count reads from flat schema."""
 
     def test_flat_format_uses_root_count(self, tmp_path: Path) -> None:
         """Flat format: _snapshot_count reads root-level count attr."""
@@ -427,27 +427,6 @@ class TestSnapshotCount:
         with h5py.File(path, "w") as f:
             f.attrs["count"] = 7
             assert _snapshot_count(f) == 7
-
-    def test_old_format_group_with_count(self, tmp_path: Path) -> None:
-        """Old format with count attr on group."""
-        from pbc_datagen.io import _snapshot_count
-
-        path = tmp_path / "test.h5"
-        with h5py.File(path, "w") as f:
-            grp = f.create_group("T=2.0000")
-            grp.create_dataset("snapshots", shape=(10, 1, 4, 4), dtype=np.int8)
-            grp.attrs["count"] = 3
-            assert _snapshot_count(f) == 3
-
-    def test_old_format_group_no_count(self, tmp_path: Path) -> None:
-        """Old format without count attr falls back to shape[0]."""
-        from pbc_datagen.io import _snapshot_count
-
-        path = tmp_path / "test.h5"
-        with h5py.File(path, "w") as f:
-            grp = f.create_group("T=2.0000")
-            grp.create_dataset("snapshots", shape=(5, 1, 4, 4), dtype=np.int8)
-            assert _snapshot_count(f) == 5
 
     def test_empty_file(self, tmp_path: Path) -> None:
         """Empty file returns 0."""

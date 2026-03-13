@@ -189,106 +189,61 @@ def main() -> None:
                     stacklevel=2,
                 )
 
-            if is_flat:
-                slot_keys = json.loads(str(f.attrs["slot_keys"]))
-                count = int(f.attrs["count"])
-                obs_names_all = json.loads(str(f.attrs["obs_names"]))
-                obs_names = args.obs if args.obs else obs_names_all
+            if not is_flat:
+                raise ValueError(
+                    f"Unsupported HDF5 format in {input_path}: missing 'slot_keys' attr. "
+                    "Only the flat schema is supported."
+                )
 
-                if is_2d:
-                    param_label = str(f.attrs["param_label"])
-                    slots = []
-                    for i, key in enumerate(slot_keys):
-                        T_val, pv = parse_slot_2d(key, param_label)
-                        slots.append((T_val, pv, i))
-                    slots.sort(key=lambda x: (x[1], x[0]))
-                    if args.rigorous and disagree_slot_keys:
-                        _excl = set(disagree_slot_keys)
-                        slots = [(t, pv, i) for t, pv, i in slots if slot_keys[i] not in _excl]
+            slot_keys = json.loads(str(f.attrs["slot_keys"]))
+            count = int(f.attrs["count"])
+            obs_names_all = json.loads(str(f.attrs["obs_names"]))
+            obs_names = args.obs if args.obs else obs_names_all
 
-                    param_vals = sorted(set(s[1] for s in slots))
-                    for obs in obs_names:
-                        data_2d[obs] = {}
-                        for pv in param_vals:
-                            pv_slots = [(t, idx) for t, p, idx in slots if p == pv]
-                            ts = np.array([t for t, _ in pv_slots])
-                            means = []
-                            stderrs = []
-                            for _, idx in pv_slots:
-                                vals = f[obs][idx, :count]
-                                means.append(np.mean(vals))
-                                stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                            data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
-                else:
-                    param_value = f.attrs.get("param_value", 0.0)
-                    t_slots = []
-                    for i, key in enumerate(slot_keys):
-                        T_val = parse_temperature(key)
-                        t_slots.append((T_val, i))
-                    t_slots.sort(key=lambda x: x[0])
-                    if args.rigorous and disagree_slot_keys:
-                        _excl = set(disagree_slot_keys)
-                        t_slots = [(t, i) for t, i in t_slots if slot_keys[i] not in _excl]
+            if is_2d:
+                param_label = str(f.attrs["param_label"])
+                slots = []
+                for i, key in enumerate(slot_keys):
+                    T_val, pv = parse_slot_2d(key, param_label)
+                    slots.append((T_val, pv, i))
+                slots.sort(key=lambda x: (x[1], x[0]))
+                if args.rigorous and disagree_slot_keys:
+                    _excl = set(disagree_slot_keys)
+                    slots = [(t, pv, i) for t, pv, i in slots if slot_keys[i] not in _excl]
 
-                    temps = np.array([t for t, _ in t_slots])
-                    for name in obs_names:
+                param_vals = sorted(set(s[1] for s in slots))
+                for obs in obs_names:
+                    data_2d[obs] = {}
+                    for pv in param_vals:
+                        pv_slots = [(t, idx) for t, p, idx in slots if p == pv]
+                        ts = np.array([t for t, _ in pv_slots])
                         means = []
                         stderrs = []
-                        for _, idx in t_slots:
-                            vals = f[name][idx, :count]
+                        for _, idx in pv_slots:
+                            vals = f[obs][idx, :count]
                             means.append(np.mean(vals))
                             stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                        data_1d[name] = (np.array(means), np.array(stderrs))
+                        data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
             else:
-                # Old per-group schema fallback
-                if is_2d:
-                    param_label = str(f.attrs["param_label"])
-                    slots_old = sorted(
-                        [
-                            (*parse_slot_2d(name, param_label), name)
-                            for name in f
-                            if name.startswith("T=")
-                        ],
-                        key=lambda x: (x[1], x[0]),
-                    )
+                param_value = f.attrs.get("param_value", 0.0)
+                t_slots = []
+                for i, key in enumerate(slot_keys):
+                    T_val = parse_temperature(key)
+                    t_slots.append((T_val, i))
+                t_slots.sort(key=lambda x: x[0])
+                if args.rigorous and disagree_slot_keys:
+                    _excl = set(disagree_slot_keys)
+                    t_slots = [(t, i) for t, i in t_slots if slot_keys[i] not in _excl]
 
-                    first_group = f[slots_old[0][2]]
-                    all_obs = [k for k in first_group if k != "snapshots"]
-                    obs_names = args.obs if args.obs else all_obs
-
-                    param_vals = sorted(set(s[1] for s in slots_old))
-                    for obs in obs_names:
-                        data_2d[obs] = {}
-                        for pv in param_vals:
-                            pv_slots = [(t, gn) for t, p, gn in slots_old if p == pv]
-                            ts = np.array([t for t, _ in pv_slots])
-                            means = []
-                            stderrs = []
-                            for _, gname in pv_slots:
-                                vals = f[gname][obs][:]
-                                means.append(np.mean(vals))
-                                stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                            data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
-                else:
-                    param_value = f.attrs["param_value"]
-                    t_groups = sorted(
-                        [(parse_temperature(name), name) for name in f if name.startswith("T=")],
-                        key=lambda x: x[0],
-                    )
-
-                    first_group = f[t_groups[0][1]]
-                    all_obs = [k for k in first_group if k != "snapshots"]
-                    obs_names = args.obs if args.obs else all_obs
-
-                    temps = np.array([t for t, _ in t_groups])
-                    for name in obs_names:
-                        means = []
-                        stderrs = []
-                        for _, gname in t_groups:
-                            vals = f[gname][name][:]
-                            means.append(np.mean(vals))
-                            stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                        data_1d[name] = (np.array(means), np.array(stderrs))
+                temps = np.array([t for t, _ in t_slots])
+                for name in obs_names:
+                    means = []
+                    stderrs = []
+                    for _, idx in t_slots:
+                        vals = f[name][idx, :count]
+                        means.append(np.mean(vals))
+                        stderrs.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
+                    data_1d[name] = (np.array(means), np.array(stderrs))
 
     # --- Plotting (shared by both branches) ---
     n_obs = len(obs_names)

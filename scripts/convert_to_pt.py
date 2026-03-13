@@ -84,65 +84,15 @@ def _read_flat_schema(f: h5py.File, model_type: str) -> list[dict[str, object]]:
     return records
 
 
-def _read_per_group_schema(f: h5py.File, model_type: str) -> list[dict[str, object]]:
-    """Read HDF5 file with old per-group schema (T=... groups)."""
-    records: list[dict[str, object]] = []
-
-    param_label = _PARAM_LABELS.get(model_type)
-    is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
-
-    # Collect group names that look like slot keys
-    group_names = [k for k in f.keys() if k.startswith("T=")]
-    if not group_names:
-        return []
-
-    for gname in group_names:
-        grp = f[gname]
-        if "snapshots" not in grp:
-            continue
-
-        parsed = parse_slot_key(gname)
-        T_val = round(parsed["T"], 4)
-
-        snap_data = grp["snapshots"][:]  # (N, C, L, L)
-        obs_names = [k for k in grp.keys() if k != "snapshots"]
-        obs_data: dict[str, np.ndarray] = {}
-        for name in obs_names:
-            obs_data[name] = grp[name][:]  # (N,)
-
-        N = snap_data.shape[0]
-        for n in range(N):
-            record: dict[str, object] = {
-                "state": torch.tensor(snap_data[n], dtype=torch.int8),
-                "T": T_val,
-            }
-            for obs_name in obs_names:
-                record[obs_name] = float(obs_data[obs_name][n])
-            if param_label is not None:
-                if is_2d and param_label in parsed:
-                    record[param_label] = round(parsed[param_label], 4)
-                else:
-                    pv = float(f.attrs.get("param_value", 0.0))
-                    record[param_label] = round(pv, 4)
-            records.append(record)
-
-    return records
-
-
 def read_hdf5(path: Path) -> list[dict[str, object]]:
     """Read a single HDF5 file and return a list of record dicts.
 
     Each record: {"state": Tensor(C,L,L), "T": float, <obs>: float, ...}
-    Supports both flat schema (slot_keys attr) and old per-group schema (T=... groups).
+    Only the flat schema (slot_keys attr) is supported.
     """
     with h5py.File(path, "r") as f:
         model_type = str(f.attrs["model_type"])
-        is_flat = "slot_keys" in f.attrs
-
-        if is_flat:
-            records = _read_flat_schema(f, model_type)
-        else:
-            records = _read_per_group_schema(f, model_type)
+        records = _read_flat_schema(f, model_type)
 
     if not records:
         warnings.warn(f"Skipping {path.name}: no records found", stacklevel=2)

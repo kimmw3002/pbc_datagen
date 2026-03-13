@@ -172,14 +172,14 @@ class ModelInfo:
 
 Flat schema is the only format. Old per-group `.h5` files become unsupported.
 
-- [ ] Step 5.4.1: `io.py` — `read_resume_state()`: remove per-group fallback; raise if `slot_keys` missing
-- [ ] Step 5.4.2: `io.py` — `read_resume_state_2d()`: same
-- [ ] Step 5.4.3: `io.py` — `_snapshot_count()`: remove per-group fallback
-- [ ] Step 5.4.4: `scripts/convert_to_pt.py` — remove `_read_per_group_schema()` and schema-detection dispatch
-- [ ] Step 5.4.5: `scripts/plot_obs_vs_T.py` — remove per-group reading branch
-- [ ] Step 5.4.6: `scripts/plot_snapshots.py` — remove per-group reading branch
-- [ ] Step 5.4.7: `tests/test_io.py` — remove old-format tests (`test_old_format_group_*`)
-- [ ] Step 5.4.8: Run full test suite
+- [x] Step 5.4.1: `io.py` — `read_resume_state()`: remove per-group fallback; raise if `slot_keys` missing
+- [x] Step 5.4.2: `io.py` — `read_resume_state_2d()`: same
+- [x] Step 5.4.3: `io.py` — `_snapshot_count()`: remove per-group fallback
+- [x] Step 5.4.4: `scripts/convert_to_pt.py` — remove `_read_per_group_schema()` and schema-detection dispatch
+- [x] Step 5.4.5: `scripts/plot_obs_vs_T.py` — remove per-group reading branch
+- [x] Step 5.4.6: `scripts/plot_snapshots.py` — remove per-group reading branch
+- [x] Step 5.4.7: `tests/test_io.py` — remove old-format tests (`test_old_format_group_*`)
+- [x] Step 5.4.8: Run full test suite
 
 ### 5.5 — Fix Dtype in Scripts + Tests
 
