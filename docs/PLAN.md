@@ -177,9 +177,9 @@ First continuous-spin model — float64 snapshots, O(2) Wolff cluster, BKT trans
 
 ### Phase 6.1: Wolff Cluster — O(2) Reflection
 
-- [ ] Step 6.1.1: `xy.cpp` — `_wolff_step()`: random reflection axis φ, DFS cluster growth with p_add = 1 − exp(min(0, −2β(sᵢ·r̂)(sⱼ·r̂))), reflect cluster spins θ → 2φ − θ.
-- [ ] Step 6.1.2: `tests/xy/test_wolff.py` — Cluster size > 1 at low T, reflection preserves energy of bonds outside cluster, energy changes by correct amount.
-- [ ] Step 6.1.3: Detailed balance test — numerical quadrature of 2×2 Z(T), energy histogram chi-squared.
+- [x] Step 6.1.1: `xy.cpp` — `_wolff_step()`: random reflection axis r̂, DFS cluster growth with p_add = 1 − exp(min(0, −2β(sᵢ·r̂)(sⱼ·r̂))), perpendicular reflection θ → 2φ + π − θ.
+- [x] Step 6.1.2: `tests/xy/test_wolff.py` — Cluster size range, only cluster spins change, temperature scaling, angle normalization, energy/magnetization cache consistency.
+- [x] Step 6.1.3: Detailed balance test — numerical quadrature of 2×2 Z(T), energy histogram chi-squared (20 bins, thinned sampling).
 
 ### Phase 6.2: Metropolis Sweep
 

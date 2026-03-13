@@ -126,3 +126,67 @@ def at_exact_probabilities(T: float, U: float) -> dict[float, float]:
 
     Z = sum(energy_weights.values())
     return {E: w / Z for E, w in energy_weights.items()}
+
+
+# ---------------------------------------------------------------------------
+# XY: continuous angles → numerical quadrature on 2×2
+# ---------------------------------------------------------------------------
+
+
+def xy_2x2_exact_energy_histogram(
+    T: float,
+    bin_edges: npt.NDArray,
+    n_grid: int = 128,
+) -> npt.NDArray:
+    """Exact energy bin probabilities for the 2×2 XY model via quadrature.
+
+    The XY model has continuous spins θ ∈ [0, 2π), so we discretize each
+    angle into n_grid values and evaluate the Boltzmann-weighted energy
+    histogram on a 3D grid (fixing θ₀ = 0 by O(2) symmetry).
+
+    On the 2×2 PBC lattice, each undirected bond {i,j} appears 4 times
+    in the directed neighbor sum (each site sees each neighbor twice due
+    to wrapping).  With the factor of 1/2 in the energy:
+
+        E = -2 [cos(θ₀-θ₁) + cos(θ₀-θ₂) + cos(θ₁-θ₃) + cos(θ₂-θ₃)]
+
+    Parameters
+    ----------
+    T : float
+        Temperature.
+    bin_edges : 1-D array, length n_bins + 1
+        Energy bin edges (same convention as np.histogram).
+    n_grid : int
+        Number of angle grid points per dimension.
+
+    Returns
+    -------
+    probs : 1-D array, length n_bins
+        Exact probability mass in each energy bin.
+    """
+    import numpy as np
+
+    beta = 1.0 / T
+    angles = np.linspace(0, 2 * np.pi, n_grid, endpoint=False)
+
+    # Fix θ₀ = 0 by O(2) symmetry.  Integrate over θ₁, θ₂, θ₃.
+    t1, t2, t3 = np.meshgrid(angles, angles, angles, indexing="ij")
+    t0 = 0.0
+
+    # Energy: E = -2[cos(θ₀-θ₁) + cos(θ₀-θ₂) + cos(θ₁-θ₃) + cos(θ₂-θ₃)]
+    E = -2.0 * (np.cos(t0 - t1) + np.cos(t0 - t2) + np.cos(t1 - t3) + np.cos(t2 - t3))
+
+    boltz = np.exp(-beta * E)
+
+    # Accumulate Boltzmann weight into energy bins.
+    E_flat = E.ravel()
+    boltz_flat = boltz.ravel()
+    n_bins = len(bin_edges) - 1
+    bin_weights = np.zeros(n_bins, dtype=np.float64)
+    indices = np.digitize(E_flat, bin_edges) - 1  # bin index for each grid point
+    for b in range(n_bins):
+        mask = indices == b
+        bin_weights[b] = np.sum(boltz_flat[mask])
+
+    Z = np.sum(bin_weights)
+    return bin_weights / Z

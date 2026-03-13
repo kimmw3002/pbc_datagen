@@ -74,6 +74,12 @@ struct XYModel {
     using ObsVec = std::vector<std::pair<std::string, double>>;
     ObsVec observables() const;
 
+    // O(2) Wolff cluster step.  Picks a random reflection axis r̂ at
+    // angle φ, grows a cluster by DFS, and reflects cluster spins
+    // perpendicular to r̂:  θ → 2φ + π − θ  (mod 2π).
+    // Returns the cluster size.
+    int _wolff_step();
+
     // Normalize an angle to [0, 2π).
     static double normalize_angle(double a);
 };
