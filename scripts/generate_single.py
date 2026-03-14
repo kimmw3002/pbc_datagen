@@ -56,7 +56,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         required=True,
         choices=VALID_MODELS,
-        help="Model type: ising, blume_capel, ashkin_teller",
+        help="Model type: ising, blume_capel, ashkin_teller, xy",
     )
     parser.add_argument("--L", type=int, required=True, help="Lattice side length")
     parser.add_argument(
@@ -64,7 +64,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=None,
         help="Hamiltonian parameter value (D for Blume-Capel, U for Ashkin-Teller). "
-        "Not used for Ising.",
+        "Not used for Ising or XY.",
     )
     parser.add_argument(
         "--T",
@@ -123,15 +123,13 @@ def main(argv: list[str] | None = None) -> None:
     logger.enable("pbc_datagen")
 
     # --- Summary panel ---
-    param_label: dict[str, str] = {"blume_capel": "D", "ashkin_teller": "U"}
-
     table = Table(show_header=False, border_style="dim", pad_edge=False, box=None)
     table.add_column("key", style="bold", min_width=16)
     table.add_column("value")
     table.add_row("Model", args.model)
     table.add_row("L", str(args.L))
-    if args.model in param_label:
-        table.add_row(f"{param_label[args.model]}", f"{param_value:.4f}")
+    if info.param_label is not None:
+        table.add_row(f"{info.param_label}", f"{param_value:.4f}")
     else:
         table.add_row("J", "1 (fixed)")
     table.add_row("T", f"{T:.4f}")

@@ -113,7 +113,7 @@ def _plot_pt(args: argparse.Namespace) -> None:
         is_2d = len(distinct_params) > 1
     else:
         is_2d = False
-    model_type = args.input.stem
+    model_type = args.input.stem.split("_L")[0]
 
     # Get cmap/norm from registry if model is recognized, else fallback
     try:

@@ -37,8 +37,18 @@ records = torch.load("dataset.pt", weights_only=False)
 - `T`: temperature, `U`: 4-spin coupling
 - Observables: `energy`, `m_sigma`, `abs_m_sigma`, `m_tau`, `abs_m_tau`, `m_baxter`, `abs_m_baxter`
 
+## XY
+
+```python
+{"state": Tensor(1,L,L), "T": float, "energy": float, "mx": float, "my": float, "abs_m": float}
+```
+
+- `state`: float64 tensor, angles in [0, 2π), shape `(1, L, L)`
+- `T`: temperature
+- Observables: `energy`, `mx`, `my`, `abs_m`
+
 ## Notes
 
-- All `state` tensors are `torch.int8`
+- `state` tensors are `torch.int8` for discrete models (Ising, Blume-Capel, Ashkin-Teller) and `torch.float64` for continuous models (XY)
 - No compression on `torch.save()`
-- Model type can be inferred from keys: `"D"` present = blume_capel, `"U"` present = ashkin_teller, neither = ising
+- Model type can be inferred from keys: `"D"` present = blume_capel, `"U"` present = ashkin_teller, `"mx"` present = xy, none of these = ising

@@ -59,7 +59,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         required=True,
         choices=VALID_MODELS,
-        help="Model type: ising, blume_capel, ashkin_teller",
+        help="Model type: ising, blume_capel, ashkin_teller, xy",
     )
     parser.add_argument("--L", type=int, required=True, help="Lattice side length")
     parser.add_argument(
@@ -68,7 +68,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Hamiltonian parameter values (D for Blume-Capel, U for Ashkin-Teller). "
-        "Not used for Ising (J=1 is fixed).",
+        "Not used for Ising or XY (J=1 is fixed).",
     )
     parser.add_argument(
         "--T-range",

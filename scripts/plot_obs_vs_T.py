@@ -110,7 +110,8 @@ def load_pt_obs(
                     stderrs.append(np.std(vals, ddof=1) / np.sqrt(n) if n > 1 else 0.0)
                 data_2d[obs][pv] = (ts, np.array(means), np.array(stderrs))
 
-        return (path.stem, L, True, param_label, obs_names, None, None, data_2d, param_vals)
+        model = path.stem.split("_L")[0]
+        return (model, L, True, param_label, obs_names, None, None, data_2d, param_vals)
     else:
         t_groups: dict[float, list[dict]] = defaultdict(list)
         for rec in records:
@@ -128,7 +129,8 @@ def load_pt_obs(
                 stderrs.append(np.std(vals, ddof=1) / np.sqrt(n) if n > 1 else 0.0)
             data_1d[obs] = (np.array(means), np.array(stderrs))
 
-        return (path.stem, L, False, None, obs_names, temps, data_1d, None, None)
+        model = path.stem.split("_L")[0]
+        return (model, L, False, None, obs_names, temps, data_1d, None, None)
 
 
 def main() -> None:

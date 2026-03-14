@@ -171,7 +171,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         required=True,
         choices=VALID_MODELS,
-        help="Model: ising / blume_capel / ashkin_teller",
+        help="Model: ising / blume_capel / ashkin_teller / xy",
     )
     parser.add_argument("--L", type=int, required=True, help="Lattice side length")
     parser.add_argument(
@@ -282,8 +282,6 @@ def main(argv: list[str] | None = None) -> None:
     logger.enable("pbc_datagen")
 
     # --- Summary panel ---
-    param_label: dict[str, str] = {"blume_capel": "D", "ashkin_teller": "U"}
-
     table = Table(show_header=False, border_style="dim", pad_edge=False, box=None)
     table.add_column("key", style="bold", min_width=18)
     table.add_column("value")
@@ -293,10 +291,9 @@ def main(argv: list[str] | None = None) -> None:
         "T range",
         f"[{T_values[0]:.4f}, {T_values[-1]:.4f}] × {args.n_T} pts (geomspace)",
     )
-    if args.model in param_label:
-        pl = param_label[args.model]
+    if info.param_label is not None:
         table.add_row(
-            f"{pl} range",
+            f"{info.param_label} range",
             f"[{param_values[0]:.4f}, {param_values[-1]:.4f}] × {args.n_param} pts (linspace)",
         )
     else:
