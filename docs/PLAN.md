@@ -188,9 +188,9 @@ First continuous-spin model — float64 snapshots, O(2) Wolff cluster, BKT trans
 
 ### Phase 6.3: Combined Sweep + Observable Caching
 
-- [ ] Step 6.3.1: `xy.cpp` — `sweep(n_sweeps)` = Wolff + Metropolis.
-- [ ] Step 6.3.2: Observable cache consistency tests — set_spin updates cache correctly, sweep results match full recompute.
-- [ ] Step 6.3.3: `snapshot()` → `(1, L, L)` float64, `randomize()` → uniform θ ∈ [0, 2π).
+- [x] Step 6.3.1: `xy.cpp` — `sweep(n_sweeps)` = Metropolis + Wolff, records (energy, mx, my, abs_m). `snapshot()` → `(1, L, L)` float64 owning copy. `randomize()` → uniform θ ∈ [0, 2π) with full cache recompute.
+- [x] Step 6.3.2: `tests/xy/test_model.py` — snapshot shape/dtype/copy semantics, randomize angle validity + cache consistency.
+- [x] Step 6.3.3: `tests/xy/test_sweep.py` — API contract, temperature guard, observable tracking, cache vs Python recompute, parametrized ergodicity (blocked Welch t-test, T ∈ {0.3,0.5,0.8,1.5,3.0}), parametrized 2×2 detailed balance chi-squared.
 
 ### Phase 6.4: Helicity Modulus (New Observable)
 

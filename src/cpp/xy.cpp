@@ -291,4 +291,72 @@ int XYModel::_metropolis_sweep() {
     return n_accepted;
 }
 
+// --- sweep -------------------------------------------------------------------
+// Combined update: n_sweeps iterations of (Metropolis sweep + Wolff step).
+// Records observables after each iteration.
+
+XYModel::SweepResult XYModel::sweep(int n_sweeps) {
+    if (T_ <= 0.0) {
+        throw std::invalid_argument(
+            "Temperature not set — call set_temperature() before sweep()");
+    }
+
+    SweepResult result;
+    auto n = static_cast<size_t>(n_sweeps);
+    result.energy.resize(n);
+    result.mx.resize(n);
+    result.my.resize(n);
+    result.abs_m.resize(n);
+
+    for (int i = 0; i < n_sweeps; ++i) {
+        _metropolis_sweep();
+        _wolff_step();
+
+        auto idx = static_cast<size_t>(i);
+        result.energy[idx] = energy();
+        result.mx[idx]     = mx();
+        result.my[idx]     = my();
+        result.abs_m[idx]  = abs_magnetization();
+    }
+
+    return result;
+}
+
+// --- snapshot ----------------------------------------------------------------
+// Return an owning copy of the theta vector.
+
+std::vector<double> XYModel::snapshot() const {
+    return theta;
+}
+
+// --- randomize ---------------------------------------------------------------
+// Set all spins to uniform random angles in [0, 2π) and recompute caches.
+
+void XYModel::randomize() {
+    // Assign random angles.
+    for (int i = 0; i < N; ++i) {
+        theta[static_cast<size_t>(i)] = rng.uniform() * TWO_PI;
+    }
+
+    // Recompute magnetization sums from scratch.
+    cached_mx_sum_ = 0.0;
+    cached_my_sum_ = 0.0;
+    for (int i = 0; i < N; ++i) {
+        cached_mx_sum_ += std::cos(theta[static_cast<size_t>(i)]);
+        cached_my_sum_ += std::sin(theta[static_cast<size_t>(i)]);
+    }
+
+    // Recompute energy from scratch: E = -Σ_{bonds} cos(θ_i - θ_j).
+    // Count each bond once: east (d=2) and south (d=1) neighbors only.
+    double coupling = 0.0;
+    for (int i = 0; i < N; ++i) {
+        double ti = theta[static_cast<size_t>(i)];
+        int j_south = nbr[static_cast<size_t>(i * 4 + 1)];
+        int j_east  = nbr[static_cast<size_t>(i * 4 + 2)];
+        coupling += std::cos(ti - theta[static_cast<size_t>(j_south)]);
+        coupling += std::cos(ti - theta[static_cast<size_t>(j_east)]);
+    }
+    cached_energy_ = -coupling;
+}
+
 }  // namespace pbc

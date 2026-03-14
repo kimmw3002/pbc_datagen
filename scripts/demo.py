@@ -47,7 +47,8 @@ def main() -> None:
 
     # Output path: scripts/<model>_L<L>_T<T>[_<param_label><param>].png
     if info.param_label is not None:
-        out_path = Path("scripts") / f"{args.model}_L{args.L}_T{args.T}_{info.param_label}{args.param}.png"
+        fname = f"{args.model}_L{args.L}_T{args.T}_{info.param_label}{args.param}.png"
+        out_path = Path("scripts") / fname
     else:
         out_path = Path("scripts") / f"{args.model}_L{args.L}_T{args.T}.png"
 

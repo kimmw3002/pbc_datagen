@@ -270,7 +270,31 @@ PYBIND11_MODULE(_core, m) {
             for (auto& [name, val] : self.observables())
                 out[py::cast(name)] = val;
             return out;
-        });
+        })
+        .def("snapshot", [](const pbc::XYModel& self) {
+            auto buf = self.snapshot();
+            // Return (1, L, L) float64 — owning copy.
+            py::array_t<double> arr({1, self.L, self.L});
+            std::copy(buf.begin(), buf.end(), arr.mutable_data());
+            return arr;
+        })
+        .def("randomize", &pbc::XYModel::randomize)
+        .def("sweep", [](pbc::XYModel& self, int n_sweeps) {
+            auto result = self.sweep(n_sweeps);
+            auto n = static_cast<py::ssize_t>(n_sweeps);
+
+            py::array_t<double> energy(n, result.energy.data());
+            py::array_t<double> mx(n, result.mx.data());
+            py::array_t<double> my(n, result.my.data());
+            py::array_t<double> abs_m(n, result.abs_m.data());
+
+            py::dict out;
+            out["energy"] = std::move(energy);
+            out["mx"]     = std::move(mx);
+            out["my"]     = std::move(my);
+            out["abs_m"]  = std::move(abs_m);
+            return out;
+        }, py::arg("n_sweeps"));
 
     // --- PT engine: non-templated functions --------------------------------
     m.def("pt_exchange", &pbc::pt_exchange,

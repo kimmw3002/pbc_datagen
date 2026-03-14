@@ -85,6 +85,27 @@ struct XYModel {
     // Returns the number of accepted proposals.
     int _metropolis_sweep();
 
+    // Result of sweep(): per-iteration observables.
+    struct SweepResult {
+        std::vector<double> energy;   // total energy after each iteration
+        std::vector<double> mx;       // intensive mx after each iteration
+        std::vector<double> my;       // intensive my after each iteration
+        std::vector<double> abs_m;    // intensive |m| after each iteration
+    };
+
+    // Combined update: n_sweeps iterations of (Metropolis sweep + Wolff step).
+    // After each iteration, records (E, mx, my, |m|) into the returned arrays.
+    // Requires set_temperature() to have been called (T_ > 0).
+    SweepResult sweep(int n_sweeps);
+
+    // Return a copy of the angle array (length N).
+    // Semantically (1, L, L) — the Python binding reshapes it.
+    std::vector<double> snapshot() const;
+
+    // Randomize all spins to uniform random angles in [0, 2π).
+    // Recomputes cached observables from scratch.  Uses the model's internal RNG.
+    void randomize();
+
     // Normalize an angle to [0, 2π).
     static double normalize_angle(double a);
 };
