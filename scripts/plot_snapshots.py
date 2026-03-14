@@ -12,7 +12,8 @@ from pathlib import Path
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.colors import Colormap, Normalize
+from pbc_datagen.registry import get_model_info, make_cmap_norm
 
 
 def parse_temperature(group_name: str) -> float:
@@ -31,43 +32,57 @@ def parse_slot_2d(group_name: str, param_label: str) -> tuple[float, float]:
     return float(m.group(1)), float(m.group(2))
 
 
-# Discrete colormap for Ising/Blume-Capel: -1=blue, 0=white, +1=red
-CMAP_3STATE = ListedColormap(["#2166ac", "#f7f7f7", "#b2182b"])
-NORM_3STATE = BoundaryNorm([-1.5, -0.5, 0.5, 1.5], CMAP_3STATE.N)
-
-# Discrete colormap for Ashkin-Teller layers: -1=blue, +1=red
-CMAP_2STATE = ListedColormap(["#2166ac", "#b2182b"])
-NORM_2STATE = BoundaryNorm([-1.5, 0, 1.5], CMAP_2STATE.N)
-
-
-def plot_single_channel(axes: np.ndarray, snapshots: np.ndarray, indices: list[int]) -> None:
-    """Plot C=1 snapshots (Ising/BC) as a single row of images."""
+def plot_single_channel(
+    axes: np.ndarray,
+    snapshots: np.ndarray,
+    indices: list[int],
+    cmap: Colormap,
+    norm: Normalize,
+) -> None:
+    """Plot C=1 snapshots as a single row of images."""
     for col, idx in enumerate(indices):
         ax = axes[col] if axes.ndim == 1 else axes[0, col]
-        ax.imshow(snapshots[idx, 0], cmap=CMAP_3STATE, norm=NORM_3STATE, interpolation="nearest")
+        ax.imshow(snapshots[idx, 0], cmap=cmap, norm=norm, interpolation="nearest")
         ax.set_title(f"#{idx}", fontsize=8)
         ax.axis("off")
 
 
-def plot_two_channel(axes: np.ndarray, snapshots: np.ndarray, indices: list[int]) -> None:
-    """Plot C=2 snapshots (AT) as three rows: sigma, tau, sigma*tau."""
+def plot_two_channel(
+    axes: np.ndarray,
+    snapshots: np.ndarray,
+    indices: list[int],
+    cmap: Colormap,
+    norm: Normalize,
+    *,
+    is_ashkin_teller: bool = False,
+) -> None:
+    """Plot C=2 snapshots.
+
+    For Ashkin-Teller: 3 rows (sigma, tau, sigma*tau).
+    For generic 2-channel: 2 rows (channel 0, channel 1).
+    """
     for col, idx in enumerate(indices):
-        ax_s = axes[0, col]
-        ax_t = axes[1, col]
-        ax_st = axes[2, col]
-        sigma = snapshots[idx, 0]
-        tau = snapshots[idx, 1]
-        ax_s.imshow(sigma, cmap=CMAP_2STATE, norm=NORM_2STATE, interpolation="nearest")
-        ax_t.imshow(tau, cmap=CMAP_2STATE, norm=NORM_2STATE, interpolation="nearest")
-        ax_st.imshow(sigma * tau, cmap=CMAP_2STATE, norm=NORM_2STATE, interpolation="nearest")
-        ax_s.set_title(f"#{idx}", fontsize=8)
-        ax_s.axis("off")
-        ax_t.axis("off")
-        ax_st.axis("off")
+        ax_0 = axes[0, col]
+        ax_1 = axes[1, col]
+        ch0 = snapshots[idx, 0]
+        ch1 = snapshots[idx, 1]
+        ax_0.imshow(ch0, cmap=cmap, norm=norm, interpolation="nearest")
+        ax_1.imshow(ch1, cmap=cmap, norm=norm, interpolation="nearest")
+        ax_0.set_title(f"#{idx}", fontsize=8)
+        ax_0.axis("off")
+        ax_1.axis("off")
+        if is_ashkin_teller:
+            ax_st = axes[2, col]
+            ax_st.imshow(ch0 * ch1, cmap=cmap, norm=norm, interpolation="nearest")
+            ax_st.axis("off")
         if col == 0:
-            ax_s.set_ylabel("σ", fontsize=10)
-            ax_t.set_ylabel("τ", fontsize=10)
-            ax_st.set_ylabel("στ", fontsize=10)
+            if is_ashkin_teller:
+                ax_0.set_ylabel("\u03c3", fontsize=10)
+                ax_1.set_ylabel("\u03c4", fontsize=10)
+                axes[2, col].set_ylabel("\u03c3\u03c4", fontsize=10)
+            else:
+                ax_0.set_ylabel("ch0", fontsize=10)
+                ax_1.set_ylabel("ch1", fontsize=10)
 
 
 def _plot_pt(args: argparse.Namespace) -> None:
@@ -99,6 +114,18 @@ def _plot_pt(args: argparse.Namespace) -> None:
     else:
         is_2d = False
     model_type = args.input.stem
+
+    # Get cmap/norm from registry if model is recognized, else fallback
+    try:
+        info = get_model_info(model_type)
+        cmap, norm = make_cmap_norm(info.viz)
+        is_at = model_type == "ashkin_teller"
+    except ValueError:
+        from matplotlib.colors import BoundaryNorm, ListedColormap
+
+        cmap = ListedColormap(["#2166ac", "#f7f7f7", "#b2182b"])
+        norm = BoundaryNorm([-1.5, -0.5, 0.5, 1.5], cmap.N)
+        is_at = False
 
     # Group by (T, param)
     groups: dict[tuple[float, float], list[dict]] = defaultdict(list)
@@ -138,11 +165,14 @@ def _plot_pt(args: argparse.Namespace) -> None:
         if C_val == 1:
             ncols = n_pick
             fig, axes = plt.subplots(1, ncols, figsize=(1.5 * ncols, 2), squeeze=False)
-            plot_single_channel(axes[0], snap_data, indices)
+            plot_single_channel(axes[0], snap_data, indices, cmap, norm)
         else:
+            n_rows = 3 if is_at else 2
             ncols = n_pick
-            fig, axes = plt.subplots(3, ncols, figsize=(1.5 * ncols, 4.5), squeeze=False)
-            plot_two_channel(axes, snap_data, indices)
+            fig, axes = plt.subplots(
+                n_rows, ncols, figsize=(1.5 * ncols, 1.5 * n_rows), squeeze=False
+            )
+            plot_two_channel(axes, snap_data, indices, cmap, norm, is_ashkin_teller=is_at)
 
         if is_2d:
             suptitle = f"{model_type} L={L}  T={T_val:.4f}  {param_label}={pv:.4f}"
@@ -194,10 +224,15 @@ def main() -> None:
     rng = np.random.default_rng(args.seed)
 
     with h5py.File(args.input, "r") as f:
-        model_type = f.attrs["model_type"]
+        model_type = str(f.attrs["model_type"])
         L = f.attrs["L"]
         is_2d = str(f.attrs.get("pt_mode", "")) == "2d"
         param_label = str(f.attrs["param_label"]) if is_2d else None
+
+        # Get cmap/norm from registry
+        info = get_model_info(model_type)
+        cmap, norm = make_cmap_norm(info.viz)
+        is_at = model_type == "ashkin_teller"
 
         # Only flat schema is supported
         is_flat = "slot_keys" in f.attrs
@@ -281,11 +316,14 @@ def main() -> None:
                 if C_val == 1:
                     ncols = n_pick
                     fig, axes = plt.subplots(1, ncols, figsize=(1.5 * ncols, 2), squeeze=False)
-                    plot_single_channel(axes[0], snap_data, indices)
+                    plot_single_channel(axes[0], snap_data, indices, cmap, norm)
                 else:
+                    n_rows = 3 if is_at else 2
                     ncols = n_pick
-                    fig, axes = plt.subplots(3, ncols, figsize=(1.5 * ncols, 4.5), squeeze=False)
-                    plot_two_channel(axes, snap_data, indices)
+                    fig, axes = plt.subplots(
+                        n_rows, ncols, figsize=(1.5 * ncols, 1.5 * n_rows), squeeze=False
+                    )
+                    plot_two_channel(axes, snap_data, indices, cmap, norm, is_ashkin_teller=is_at)
 
                 if is_2d:
                     suptitle = f"{model_type} L={L}  T={T_val:.4f}  {param_label}={pv:.4f}"
