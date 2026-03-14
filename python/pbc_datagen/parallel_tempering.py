@@ -327,7 +327,8 @@ class PTEngine:
         self.ladder_locked = False
         self.tau_max: float | None = None
 
-        if model_type == "ising":
+        info = get_model_info(model_type)
+        if info.param_label is None:
             logger.info(
                 "PTEngine created: model={} L={} replicas={} T=[{:.4f}, {:.4f}]",
                 model_type,

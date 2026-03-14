@@ -250,11 +250,12 @@ def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
 
     # --- Validate model vs param flags ---
-    if args.model == "ising":
+    info = get_model_info(args.model)
+    if info.param_label is None:
         if args.param_min is not None or args.param_max is not None:
             console.print(
-                "[bold red]Error:[/] Ising has no tunable Hamiltonian parameter "
-                "(J=1 is fixed in C++). Do not pass --param-min / --param-max."
+                f"[bold red]Error:[/] {args.model} has no tunable Hamiltonian parameter. "
+                "Do not pass --param-min / --param-max."
             )
             raise SystemExit(1)
         param_values = np.array([0.0])

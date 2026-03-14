@@ -137,14 +137,15 @@ def main(argv: list[str] | None = None) -> None:
     use_2d = args.param_range is not None
 
     # --- Validate arguments ---
-    if args.model == "ising":
+    info = get_model_info(args.model)
+    if info.param_label is None:
         if args.params is not None or use_2d:
             console.print(
-                "[bold red]Error:[/] Ising has no tunable Hamiltonian parameter "
-                "(J=1 is fixed in C++). Do not pass --params or --param-range."
+                f"[bold red]Error:[/] {args.model} has no tunable Hamiltonian parameter. "
+                "Do not pass --params or --param-range."
             )
             raise SystemExit(1)
-        # Dummy value so the loop runs once — Ising ignores param_value
+        # Dummy value so the loop runs once — param-less models ignore param_value
         args.params = [0.0]
     elif use_2d:
         if args.params is not None:

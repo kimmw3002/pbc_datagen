@@ -5,6 +5,7 @@ Usage:
     python scripts/demo.py ising --T 2.269
     python scripts/demo.py blume_capel --T 0.609 --param 1.966
     python scripts/demo.py ashkin_teller --T 2.269 --param 0.0
+    python scripts/demo.py xy --T 0.89
 
 Press Ctrl+C to stop.
 """
@@ -18,8 +19,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from pbc_datagen.registry import get_model_info, make_cmap_norm, valid_model_names
 
-# Models that support the demo loop (need snapshot() + sweep() + observables())
-_DEMO_MODELS = [n for n in valid_model_names() if n != "xy"]
+# All registered models support the demo loop (snapshot() + sweep() + observables())
+_DEMO_MODELS = list(valid_model_names())
 
 
 def main() -> None:

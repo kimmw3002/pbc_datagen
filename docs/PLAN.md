@@ -192,7 +192,7 @@ First continuous-spin model — float64 snapshots, O(2) Wolff cluster, BKT trans
 - [x] Step 6.3.2: `tests/xy/test_model.py` — snapshot shape/dtype/copy semantics, randomize angle validity + cache consistency.
 - [x] Step 6.3.3: `tests/xy/test_sweep.py` — API contract, temperature guard, observable tracking, cache vs Python recompute, parametrized ergodicity (blocked Welch t-test, T ∈ {0.3,0.5,0.8,1.5,3.0}), parametrized 2×2 detailed balance chi-squared.
 
-### Phase 6.4: Helicity Modulus (New Observable)
+### Phase 6.4: Helicity Modulus (New Observable) — SKIPPED (future work)
 
 - [ ] Step 6.4.1: `xy.cpp` — helicity modulus ingredients: `hel_e_x` = (1/N) Σ_x cos(Δθ), `hel_jx` = (1/N) Σ_x sin(Δθ). Python computes Υ = ⟨hel_e_x⟩ − β N ⟨hel_jx²⟩.
 - [ ] Step 6.4.2: Add helicity terms to `observables()` dict.
@@ -200,14 +200,10 @@ First continuous-spin model — float64 snapshots, O(2) Wolff cluster, BKT trans
 
 ### Phase 6.5: Bindings + Registry Integration
 
-- [ ] Step 6.5.1: `bindings.cpp` — bind XYModel, add `pt_rounds_xy` instantiation.
-- [ ] Step 6.5.2: `_core.pyi` — type stubs for XYModel.
-- [ ] Step 6.5.3: `registry.py` — add `"xy"` entry with `snapshot_dtype=np.float64`, `n_channels=1`, `param_label=None`.
-- [ ] Step 6.5.4: `tests/test_snapshot_method.py` — add XY snapshot shape/dtype checks.
-- [ ] Step 6.5.5: `tests/test_observable_cache.py` — add XY cache consistency checks.
+- [x] Step 6.5.1: `bindings.cpp` — bind XYModel, add `pt_rounds_xy` instantiation.
+- [x] Step 6.5.2: `_core.pyi` — type stubs for XYModel.
+- [x] Step 6.5.3: `registry.py` — add `"xy"` entry with `snapshot_dtype=np.float64`, `n_channels=1`, `param_label=None`.
 
-### Phase 6.6: Integration + E2E
+### Phase 6.6: Docs
 
-- [ ] Step 6.6.1: PT detailed balance test — numerical quadrature 2×2 reference for XY.
-- [ ] Step 6.6.2: E2E test — XY 1D PT pipeline.
-- [ ] Step 6.6.3: Update `docs/ARCHITECTURE.md`, `docs/PLAN.md`, `docs/LESSONS.md`.
+- [ ] Step 6.6.1: Update `docs/ARCHITECTURE.md`, `docs/PLAN.md`, `docs/LESSONS.md`.

@@ -189,9 +189,7 @@ def _default_output_file(input_path: Path) -> Path:
     nT = len(all_T)
     latest_ts = max(_extract_timestamp(p.name) for p in h5_files)
 
-    if model_type == "ising":
-        name = f"ising_L{L}_T={Tmin:.4f}-{Tmax:.4f}_{nT}x1_{latest_ts}.pt"
-    elif param_label:
+    if param_label:
         Pmin, Pmax = min(all_param), max(all_param)
         nP = len(all_param)
         name = (

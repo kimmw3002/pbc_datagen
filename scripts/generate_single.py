@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from loguru import logger
-from pbc_datagen.registry import valid_model_names
+from pbc_datagen.registry import get_model_info, valid_model_names
 from pbc_datagen.single_chain import run_single_campaign
 from rich.console import Console
 from rich.panel import Panel
@@ -98,11 +98,12 @@ def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
 
     # --- Validate --params vs model ---
-    if args.model == "ising":
+    info = get_model_info(args.model)
+    if info.param_label is None:
         if args.params is not None:
             console.print(
-                "[bold red]Error:[/] Ising has no tunable Hamiltonian parameter "
-                "(J=1 is fixed in C++). Do not pass --params for Ising."
+                f"[bold red]Error:[/] {args.model} has no tunable Hamiltonian parameter. "
+                "Do not pass --params."
             )
             raise SystemExit(1)
         param_value = 0.0

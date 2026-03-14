@@ -615,6 +615,36 @@ PYBIND11_MODULE(_core, m) {
         py::arg("n_rounds"), py::arg("rng"),
         py::arg("track_observables"));
 
+    m.def("pt_rounds_xy",
+        [list_to_ivec, ivec_to_list, pt_result_to_dict](
+            py::list py_replicas, std::vector<double> temps,
+            py::list py_r2t, py::list py_t2r,
+            py::list py_labels, int n_rounds,
+            pbc::Rng& rng, bool track_obs) {
+            std::vector<pbc::XYModel*> reps;
+            for (auto& obj : py_replicas)
+                reps.push_back(obj.cast<pbc::XYModel*>());
+            auto r2t    = list_to_ivec(py_r2t);
+            auto t2r    = list_to_ivec(py_t2r);
+            auto labels = list_to_ivec(py_labels);
+
+            pbc::PTResult res;
+            {
+                py::gil_scoped_release release;
+                res = pbc::pt_rounds(reps, temps, r2t, t2r, labels,
+                                     n_rounds, rng, track_obs);
+            }
+
+            ivec_to_list(r2t, py_r2t);
+            ivec_to_list(t2r, py_t2r);
+            ivec_to_list(labels, py_labels);
+            return pt_result_to_dict(res);
+        },
+        py::arg("replicas"), py::arg("temps"),
+        py::arg("r2t"), py::arg("t2r"), py::arg("labels"),
+        py::arg("n_rounds"), py::arg("rng"),
+        py::arg("track_observables"));
+
     // Helper: convert PT2DResult to a Python dict.
     // Only contains obs_streams — no 1D label tracking artifacts.
     auto pt_2d_result_to_dict = [&obs_streams_to_numpy](const pbc::PT2DResult& res) {

@@ -243,6 +243,16 @@ def pt_rounds_at(
     rng: Rng,
     track_observables: bool,
 ) -> PTResult: ...
+def pt_rounds_xy(
+    replicas: list[XYModel],
+    temps: list[float],
+    r2t: list[int],
+    t2r: list[int],
+    labels: list[int],
+    n_rounds: int,
+    rng: Rng,
+    track_observables: bool,
+) -> PTResult: ...
 
 # --- PT engine: 2D parameter-space (BC/AT only) --------------------------------
 
