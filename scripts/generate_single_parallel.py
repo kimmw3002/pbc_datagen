@@ -193,7 +193,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=10,
         dest="n_T",
-        help="Number of T points via np.geomspace (default: 10)",
+        help="Number of T points (default: 10)",
+    )
+    parser.add_argument(
+        "--T-spacing",
+        type=str,
+        default="geom",
+        choices=["geom", "lin"],
+        dest="T_spacing",
+        help="Temperature spacing: geom (geomspace) or lin (linspace) (default: geom)",
     )
     parser.add_argument(
         "--param-min",
@@ -269,7 +277,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # Round to 4 d.p. — sub-0.0001 precision is never physically meaningful,
     # and rounding ensures filenames match the simulation values exactly.
-    T_values = np.round(np.geomspace(args.T_min, args.T_max, args.n_T), 4)
+    T_space_fn = np.geomspace if args.T_spacing == "geom" else np.linspace
+    T_values = np.round(T_space_fn(args.T_min, args.T_max, args.n_T), 4)
     param_values = np.round(param_values, 4)
 
     # param-outer, T-inner: sweeps all T at a fixed param before advancing
@@ -289,7 +298,7 @@ def main(argv: list[str] | None = None) -> None:
     table.add_row("L", str(args.L))
     table.add_row(
         "T range",
-        f"[{T_values[0]:.4f}, {T_values[-1]:.4f}] × {args.n_T} pts (geomspace)",
+        f"[{T_values[0]:.4f}, {T_values[-1]:.4f}] × {args.n_T} pts ({'geomspace' if args.T_spacing == 'geom' else 'linspace'})",
     )
     if info.param_label is not None:
         table.add_row(
